@@ -283,7 +283,9 @@
           el('div', '', `首次达标：${w.date} ${w.time.slice(11)} · 达标时累计 ${yuan(w.reachedCents)} · 当天总额 ${yuan(w.dayTotalCents)}`),
           table(['订单号', '创建时间', '真实扣款'], w.orders.map(o => [o.orderId, o.createdAt, calc.yuan(o.amountCents)])));
         if (globalThis.WorkToolRoleCopy && w.roleName && server?.name) {
-          box.firstChild.append(globalThis.WorkToolRoleCopy.button(() => ({roleId: w.roleId, roleName: w.roleName, serverName: server.name})));
+          const name = el('span','',w.roleName);
+          globalThis.WorkToolRoleCopy.bindName(name,() => ({roleId: w.roleId, roleName: w.roleName, serverName: server.name}));
+          box.firstChild.replaceChildren(name,document.createTextNode(` · ${w.roleId}`));
         }
         best.append(box);
       }

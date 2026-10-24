@@ -24,27 +24,54 @@
       }
     }
   }
-  function button(read) {
-    const host = document.createElement('span');
-    host.dataset.workToolRoleCopy = '';
-    const shadow = host.attachShadow({mode: 'open'});
-    const style = document.createElement('style');
-    style.textContent = 'button{font:12px/1.5 "Microsoft YaHei",sans-serif;margin-left:6px;padding:2px 6px;border:0;border-radius:4px;color:#2859a9;background:#edf3ff;cursor:pointer;white-space:nowrap}button:disabled{opacity:.6}button:focus-visible{outline:2px solid #2859a9}';
-    const copy = document.createElement('button');
-    copy.type = 'button'; copy.textContent = '复制角色信息';
-    copy.title = '复制为一行：角色ID、角色名、区服名称（制表符分隔）';
-    copy.setAttribute('aria-live', 'polite');
-    let timer;
-    copy.addEventListener('click', async event => {
-      event.preventDefault(); event.stopPropagation(); clearTimeout(timer); copy.disabled = true;
-      try { await write(format(read())); copy.textContent = '已复制'; }
-      catch (error) { copy.textContent = '复制失败'; copy.title = error.message; }
-      finally { copy.disabled = false; timer = setTimeout(() => { copy.textContent = '复制角色信息'; }, 2000); }
-    });
-    shadow.append(style, copy);
-    return host;
+  let toastHost, toastText, toastTimer;
+  function notify(message) {
+    if (!toastHost?.isConnected) {
+      toastHost = document.createElement('div'); toastHost.id = 'work-tool-role-copy-toast';
+      toastHost.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:2147483647;pointer-events:none;';
+      const shadow = toastHost.attachShadow({mode:'open'}), style = document.createElement('style');
+      style.textContent = 'div{font:13px/1.6 "Microsoft YaHei",sans-serif;color:white;background:#233047;padding:8px 16px;border-radius:6px;box-shadow:0 3px 12px #0003}';
+      toastText = document.createElement('div'); toastText.setAttribute('role','status'); toastText.setAttribute('aria-live','polite');
+      shadow.append(style,toastText); document.documentElement.append(toastHost);
+    }
+    clearTimeout(toastTimer); toastHost.hidden = false; toastText.textContent = message;
+    toastTimer = setTimeout(() => { toastHost.hidden = true; }, 2000);
   }
-  const api = {format, button};
+  const bound = new WeakMap();
+  function unbindName(target) {
+    const state = bound.get(target); if (!state) return;
+    target.removeEventListener('click',state.activate,true); target.removeEventListener('keydown',state.activate,true);
+    for (const [name,value] of Object.entries(state.attributes)) value === null ? target.removeAttribute(name) : target.setAttribute(name,value);
+    target.style.cursor = state.cursor; target.style.color = state.color;
+    delete target.dataset.workToolRoleCopy; bound.delete(target);
+  }
+  function bindName(target, read) {
+    const existing = bound.get(target);
+    if (existing) { existing.read = read; target.setAttribute('aria-label',`${clean(read().roleName)}，点击复制角色信息`); return target; }
+    const state = {read,busy:false,cursor:target.style.cursor,color:target.style.color,attributes:{}};
+    for (const name of ['title','role','tabindex','aria-label']) state.attributes[name] = target.getAttribute(name);
+    target.dataset.workToolRoleCopy = ''; target.style.cursor = 'copy'; target.style.color = '#2859a9';
+    target.title = '点击角色名复制：角色ID、角色名、区服名称';
+    target.setAttribute('role','button'); target.setAttribute('tabindex','0');
+    target.setAttribute('aria-label',`${clean(read().roleName)}，点击复制角色信息`);
+    state.activate = async event => {
+      if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
+      if (event.type === 'keydown' && !['Enter',' '].includes(event.key)) return;
+      if (event.type === 'click' && event.button !== 0) return;
+      if (event.target.closest?.('input,textarea,select,button')) return;
+      const selection = document.getSelection();
+      if (event.type === 'click' && selection && !selection.isCollapsed && selection.containsNode(target,true)) { event.preventDefault(); return; }
+      event.preventDefault(); event.stopPropagation();
+      if (state.busy) return;
+      state.busy = true;
+      try { const info = state.read(); await write(format(info)); notify(`已复制「${clean(info.roleName)}」的角色信息`); }
+      catch { notify('复制失败，请重试'); }
+      finally { state.busy = false; }
+    };
+    target.addEventListener('click',state.activate,true); target.addEventListener('keydown',state.activate,true);
+    bound.set(target,state); return target;
+  }
+  const api = {format, bindName};
   root.WorkToolRoleCopy = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (typeof document === 'undefined' || !/^\/(?:order\/ls|game\/playerinfo)\/?$/.test(location.pathname)) return;
@@ -67,15 +94,14 @@
     const table = document.querySelector('#list_table');
     if (!table) return;
     const cols = columns(table);
-    if (!cols) { for (const host of table.querySelectorAll('[data-work-tool-role-copy]')) host.remove(); return; }
+    if (!cols) { for (const target of table.querySelectorAll('[data-work-tool-role-copy]')) unbindName(target); return; }
     for (const row of table.querySelectorAll('tbody tr')) {
       const existing = row.querySelector('[data-work-tool-role-copy]');
       try { format(read(row, cols)); }
-      catch { existing?.remove(); continue; }
+      catch { if (existing) unbindName(existing); continue; }
       const cell = row.children[cols.roleName];
-      if (existing?.parentElement === cell) continue;
-      existing?.remove();
-      cell.append(button(() => read(row, columns(table) || cols)));
+      if (existing && existing !== cell) unbindName(existing);
+      bindName(cell,() => read(row, columns(table) || cols));
     }
   }
   let pending = false;

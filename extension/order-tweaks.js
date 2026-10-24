@@ -20,7 +20,7 @@
         event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
     const target = event.target;
     if (!(target instanceof Element) ||
-        target.closest('textarea, select, button, a, [contenteditable]:not([contenteditable="false"]), [role="combobox"], .select2-container, .select2-dropdown, .daterangepicker')) return;
+        target.closest('textarea, select, button, a, [data-work-tool-role-copy], [contenteditable]:not([contenteditable="false"]), [role="combobox"], .select2-container, .select2-dropdown, .daterangepicker')) return;
     const button = document.querySelector('#form_search');
     const form = button && button.closest('form');
     if (!form || (!form.contains(target) && target !== document.body && target !== document.documentElement)) return;
