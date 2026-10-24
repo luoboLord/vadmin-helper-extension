@@ -27,6 +27,7 @@
     table { border-collapse:collapse;width:100%;font-size:12px;margin-top:6px; } th,td { border:1px solid #e4eaf3;padding:3px 5px;text-align:left;overflow-wrap:anywhere; }
     th { background:#f4f7fc; } td.num { text-align:right; } details { margin-top:6px; } summary { cursor:pointer;color:#2859a9; }
     .matches { max-height:160px;overflow:auto;border:1px solid #e4eaf3;border-radius:5px;margin-top:4px; } .matches div { padding:3px 6px;display:flex;gap:6px;align-items:center; }
+    .reach-time { font-weight:bold; }
     [hidden] { display:none!important; }
   `;
   const el = (tag, className, textValue) => {
@@ -53,10 +54,18 @@
     t.append(head);
     for (const row of rows) {
       const tr = el('tr');
-      for (const cell of row) tr.append(el('td', typeof cell === 'number' ? 'num' : '', String(cell)));
+      for (const cell of row) {
+        if (cell instanceof Node) { const td = el('td'); td.append(cell); tr.append(td); }
+        else tr.append(el('td', typeof cell === 'number' ? 'num' : '', String(cell)));
+      }
       t.append(tr);
     }
     return t;
+  }
+  function reachLine(w) {
+    const line = el('div');
+    line.append('首次达标：', el('span', 'reach-time', `${w.date} ${w.time.slice(11)}`), ` · 达标时累计 ${yuan(w.reachedCents)} · 当天总额 ${yuan(w.dayTotalCents)}`);
+    return line;
   }
 
   // 从当前已查询的结果读取游戏和区服：游戏取筛选框；区服取结果表的区服列及筛选框。
@@ -280,7 +289,8 @@
         const box = el('div', 'winner'), server = scope.find(s => s.gid === w.gameId && s.psid === w.serverId);
         box.append(el('div', 'big', `${w.roleName || '(无角色名)'} · ${w.roleId}`),
           el('div', '', `${gameName(w.gameId)} · ${server?.name || ''}（区服ID ${w.serverId}）`),
-          el('div', '', `首次达标：${w.date} ${w.time.slice(11)} · 达标时累计 ${yuan(w.reachedCents)} · 当天总额 ${yuan(w.dayTotalCents)}`),
+          // 活动常限定达标后几天内申请，达标时间加粗便于核对是否过期。
+          reachLine(w),
           table(['订单号', '创建时间', '真实扣款'], w.orders.map(o => [o.orderId, o.createdAt, calc.yuan(o.amountCents)])));
         if (globalThis.WorkToolRoleCopy && w.roleName && server?.name) {
           const name = el('span','',w.roleName);
@@ -294,7 +304,7 @@
       const rank = el('section');
       rank.append(el('h2', '', '其他达标角色'));
       if (result.stoppedEarly) rank.append(el('div', 'muted', '已提前结束：只列出最早达标当天及之前核查到的角色。需要完整排名请勾选“完整扫描”。'));
-      if (others.length) rank.append(table(['名次', '角色', '角色ID', '区服ID', '达标时间', '达标时累计'], others.map(r => [r.place + (r.tied ? '（并列）' : ''), r.roleName, r.roleId, r.serverId, r.time, calc.yuan(r.reachedCents)])));
+      if (others.length) rank.append(table(['名次', '角色', '角色ID', '区服ID', '达标时间', '达标时累计'], others.map(r => [r.place + (r.tied ? '（并列）' : ''), r.roleName, r.roleId, r.serverId, el('span', 'reach-time', r.time), calc.yuan(r.reachedCents)])));
       else rank.append(el('div', 'muted', '无。'));
       results.append(rank);
       const audit = el('section'), auditDetails = el('details');
