@@ -18,7 +18,7 @@
     $('directory-status').textContent = directory ? `已选择：${directory.name}` : '尚未选择';
     $('apply-update').disabled = busy || !directory || !prepared || backup?.state === 'pending';
     for (const id of ['choose-directory','update-zip','restore-update','repair-update']) $(id).disabled = busy;
-    for (const id of ['save-github','github-url','github-branch','github-folder']) $(id).disabled = busy;
+    for (const id of ['save-github','github-url','github-branch','github-folder','github-use-proxy']) $(id).disabled = busy;
     $('github-check').disabled = busy || !githubConfig || backup?.state === 'pending';
     $('update-recovery').hidden = backup?.state !== 'pending';
     $('github-status').dataset.available = String(!!githubStatus?.available);
@@ -51,9 +51,12 @@
     if (busy) return;
     busy = true; display(); notice('正在保存并检查更新源…');
     try {
-      const input = {url:$('github-url').value,branch:$('github-branch').value,folder:$('github-folder').value};
+      const input = {url:$('github-url').value,branch:$('github-branch').value,folder:$('github-folder').value,accelerated:$('github-use-proxy').checked};
       // 先本地验证，避免无效配置覆盖已使用的更新源。
-      if (input.url.trim()) WorkToolGithub.config(input);
+      if (input.url.trim()) {
+        WorkToolGithub.config(input);
+        if (input.accelerated && !await chrome.permissions.request({origins:['https://gh-proxy.com/*']})) throw Error('未授权加速域名，更新源未修改');
+      }
       const result = await send({type:'updates:configure',config:input});
       githubConfig = input.url.trim() ? WorkToolGithub.config(input) : null; githubStatus = result.status;
       notice(githubStatus?.state === 'error' ? githubStatus.error : githubConfig ? '更新源已保存，之后会定时检查。' : '已停用GitHub更新检查。');
@@ -142,7 +145,8 @@
     try {
       [directory, backup] = await Promise.all([files.state(DIRECTORY), files.state(BACKUP)]);
       const result = await send({type:'updates:get'}); githubConfig = result.config; githubStatus = result.status;
-      if (githubConfig) { $('github-url').value = githubConfig.url; $('github-branch').value = githubConfig.branch === 'HEAD' ? '' : githubConfig.branch; $('github-folder').value = githubConfig.folder; }
+      if (githubConfig) { $('github-url').value = githubConfig.url; $('github-branch').value = githubConfig.branch === 'HEAD' ? '' : githubConfig.branch; $('github-folder').value = githubConfig.folder;
+        $('github-use-proxy').checked = !!githubConfig.accelerated; }
       // manifest落盘时页面可能被浏览器重载，导致最后的完成记录尚未提交。
       // 已有权限且全部文件与正在运行的版本一致时，仅补齐记录，不改安装文件。
       const target = backup?.directory || directory;

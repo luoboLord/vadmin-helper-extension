@@ -1,6 +1,7 @@
 (function(root) {
   'use strict';
   const local = root.WorkToolLocalUpdate;
+  const PROXY = 'https://gh-proxy.com/';
   const encode = value => encodeURIComponent(value);
   function config(input) {
     let value = String(input?.url || '').trim();
@@ -16,11 +17,13 @@
     if (branch.length > 150 || /[\s\\~^:?*\[\x00-\x1f]/.test(branch) || branch.includes('..') || branch.includes('@{')) throw Error('分支名称无效');
     const folder = String(input.folder ?? 'extension').trim().replace(/\/$/, '');
     if (folder) local.path(folder);
-    return {url:`https://github.com/${owner}/${repo}`, owner, repo, branch, folder};
+    const result = {url:`https://github.com/${owner}/${repo}`, owner, repo, branch, folder};
+    if (input.accelerated === true) result.accelerated = true;
+    return result;
   }
-  const key = value => { const c = config(value); return `${c.url.toLowerCase()}|${c.branch}|${c.folder}`; };
-  async function bytes(url, limit, fetchImpl = root.fetch) {
-    const response = await fetchImpl(url, {credentials:'omit', cache:'no-store', redirect:'error', referrerPolicy:'no-referrer', signal:AbortSignal.timeout(30000)});
+  const key = value => { const c = config(value); return `${c.url.toLowerCase()}|${c.branch}|${c.folder}` + (c.accelerated ? '|gh-proxy.com' : ''); };
+  async function bytes(url, limit, fetchImpl = root.fetch, timeout = 30000) {
+    const response = await fetchImpl(url, {credentials:'omit', cache:'no-store', redirect:'error', referrerPolicy:'no-referrer', signal:AbortSignal.timeout(timeout)});
     if (!response.ok) {
       if (response.status === 404) throw Error('找不到公开仓库、分支或扩展文件，请检查更新源设置');
       if (response.status === 403 || response.status === 429) throw Error('GitHub访问受限或检查过于频繁，请稍后重试');
@@ -30,9 +33,26 @@
     if (result.byteLength > limit) throw Error('GitHub响应文件超过大小限制');
     return result;
   }
-  async function json(url, fetchImpl) {
-    try { return JSON.parse(new TextDecoder().decode(await bytes(url,8*1024*1024,fetchImpl))); }
-    catch (error) { if (error instanceof SyntaxError) throw Error('GitHub返回内容不是有效JSON'); throw error; }
+  function reader(source, fetchImpl) {
+    let route = source.accelerated ? 'proxy' : 'direct';
+    async function request(url, limit, parse = data => data) {
+      const routes = source.accelerated ? [route,route === 'proxy' ? 'direct' : 'proxy'] : ['direct'];
+      let failure;
+      for (const candidate of routes) {
+        try {
+          const data = await bytes(candidate === 'proxy' ? PROXY+url : url,limit,fetchImpl,source.accelerated ? 10000 : 30000);
+          const result = await parse(data); route = candidate; return result;
+        } catch (error) { failure = error; }
+      }
+      throw source.accelerated ? Error(`加速与直连均失败：${failure.message}`) : failure;
+    }
+    return {
+      json: url => request(url,8*1024*1024,data => { try { return JSON.parse(new TextDecoder().decode(data)); } catch { throw Error('GitHub返回内容不是有效JSON'); } }),
+      file: (url, entry) => request(url,10*1024*1024,async data => {
+        if (data.length !== entry.size) throw Error(`更新文件大小不一致：${entry.name}`);
+        await verify(data,entry.sha); return data;
+      })
+    };
   }
   const sha = value => typeof value === 'string' && /^[a-f0-9]{40}$/.test(value);
   function raw(source, commit, name) {
@@ -46,9 +66,10 @@
   }
   async function check(input, currentVersion, {fetchImpl} = {}) {
     const source = config(input), base = `https://api.github.com/repos/${encode(source.owner)}/${encode(source.repo)}`;
-    const commit = await json(`${base}/commits/${encode(source.branch)}`,fetchImpl);
+    const read = reader(source,fetchImpl);
+    const commit = await read.json(`${base}/commits/${encode(source.branch)}`);
     if (!sha(commit.sha) || !sha(commit.commit?.tree?.sha)) throw Error('GitHub提交信息不完整');
-    const tree = await json(`${base}/git/trees/${commit.commit.tree.sha}?recursive=1`,fetchImpl);
+    const tree = await read.json(`${base}/git/trees/${commit.commit.tree.sha}?recursive=1`);
     if (!Array.isArray(tree.tree) || tree.truncated || tree.sha !== commit.commit.tree.sha) throw Error('GitHub文件列表不完整，无法更新');
     const prefix = source.folder ? source.folder+'/' : '', files = [], names = new Set();
     let total = 0;
@@ -63,21 +84,18 @@
     if (!files.length || files.length > 250 || total > 20*1024*1024) throw Error('更新文件数量或总大小超限，请仅指定扩展文件目录');
     const entry = files.find(f=>f.name === 'manifest.json');
     if (!entry) throw Error('更新目录中没有manifest.json，请检查扩展目录设置');
-    const data = await bytes(raw(source,commit.sha,entry.name),1024*1024,fetchImpl);
-    if (data.length !== entry.size) throw Error('版本文件大小不一致，更新未写入');
-    await verify(data,entry.sha);
+    const data = await read.file(raw(source,commit.sha,entry.name),entry);
     const manifest = local.manifest(data);
     return {available:local.compare(manifest.version,currentVersion)>0,version:manifest.version,commit:commit.sha,source,sourceKey:key(source),files,checkedAt:Date.now()};
   }
   async function download(snapshot, currentVersion, {fetchImpl,onProgress=()=>{}} = {}) {
     if (!snapshot?.available || !sha(snapshot.commit)) throw Error('请先检查更新');
-    const source = config(snapshot.source), files = new Map();
+    const source = config(snapshot.source), files = new Map(), read = reader(source,fetchImpl);
     if (key(source) !== snapshot.sourceKey || !Array.isArray(snapshot.files) || snapshot.files.length > 250) throw Error('更新信息无效，请重新检查');
     for (const entry of snapshot.files) {
       local.path(entry.name);
-      const data = await bytes(raw(source,snapshot.commit,entry.name),10*1024*1024,fetchImpl);
-      if (data.length !== entry.size) throw Error(`更新文件大小不一致：${entry.name}`);
-      await verify(data,entry.sha); files.set(entry.name,data); onProgress(files.size,snapshot.files.length);
+      const data = await read.file(raw(source,snapshot.commit,entry.name),entry);
+      files.set(entry.name,data); onProgress(files.size,snapshot.files.length);
     }
     const prepared = local.prepareFiles(files,currentVersion);
     if (prepared.version !== snapshot.version) throw Error('更新版本不一致，请重新检查');

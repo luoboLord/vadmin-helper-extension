@@ -37,6 +37,7 @@
     }
     async function configure(input) {
       const config = input?.url?.trim() ? github.config(input) : null;
+      if (config?.accelerated && !await chrome.permissions?.contains({origins:['https://gh-proxy.com/*']})) throw Error('请先在更新页授权gh-proxy.com，再保存更新源');
       await chrome.storage.local.set({githubUpdateConfig:config,githubUpdateStatus:null}); await badge(null);
       return config ? check(true) : {state:'unconfigured',available:false};
     }
