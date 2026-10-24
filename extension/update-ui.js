@@ -55,7 +55,7 @@
       // 先本地验证，避免无效配置覆盖已使用的更新源。
       if (input.url.trim()) {
         WorkToolGithub.config(input);
-        if (input.accelerated && !await chrome.permissions.request({origins:['https://gh-proxy.com/*']})) throw Error('未授权加速域名，更新源未修改');
+        if (input.accelerated && !await chrome.permissions.request({origins:['https://update.cnszxyt.com/*']})) throw Error('未授权加速域名，更新源未修改');
       }
       const result = await send({type:'updates:configure',config:input});
       githubConfig = input.url.trim() ? WorkToolGithub.config(input) : null; githubStatus = result.status;

@@ -1,7 +1,7 @@
 (function(root) {
   'use strict';
   const local = root.WorkToolLocalUpdate;
-  const PROXY = 'https://gh-proxy.com/';
+  const PROXY = 'https://update.cnszxyt.com/';
   const encode = value => encodeURIComponent(value);
   function config(input) {
     let value = String(input?.url || '').trim();
@@ -21,7 +21,7 @@
     if (input.accelerated === true) result.accelerated = true;
     return result;
   }
-  const key = value => { const c = config(value); return `${c.url.toLowerCase()}|${c.branch}|${c.folder}` + (c.accelerated ? '|gh-proxy.com' : ''); };
+  const key = value => { const c = config(value); return `${c.url.toLowerCase()}|${c.branch}|${c.folder}` + (c.accelerated ? '|update.cnszxyt.com' : ''); };
   async function bytes(url, limit, fetchImpl = root.fetch, timeout = 30000) {
     const response = await fetchImpl(url, {credentials:'omit', cache:'no-store', redirect:'error', referrerPolicy:'no-referrer', signal:AbortSignal.timeout(timeout)});
     if (!response.ok) {
