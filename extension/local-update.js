@@ -102,6 +102,11 @@
   async function restore(directory, backup) {
     // manifest最后恢复；仅处理更新前已备份的文件，不递归删除目录。
     const entries = backup.entries.slice().sort((a, b) => (a.name === 'manifest.json') - (b.name === 'manifest.json'));
+    // 先检查所有文件，避免发现外部修改前已经回退了一部分文件。
+    for (const entry of entries) {
+      const current = await read(directory, entry.name);
+      if (!same(current, entry.before) && !same(current, entry.after) && !(entry.before === null && current?.length === 0)) throw Error(`文件已被其他程序修改，未覆盖：${entry.name}`);
+    }
     for (const entry of entries) {
       const current = await read(directory, entry.name);
       if (same(current, entry.before)) continue;
@@ -111,6 +116,17 @@
       else await write(directory, entry.name, entry.before);
     }
     for (const entry of entries) if (!same(await read(directory, entry.name), entry.before)) throw Error('恢复校验失败，请保留备份并重试');
+  }
+  async function inspectBackup(directory, backup) {
+    if (!backup?.entries?.length || !backup.entries.some(entry => entry.name === 'manifest.json')) throw Error('更新备份不完整，请保留备份');
+    let before = true, after = true;
+    for (const entry of backup.entries) {
+      const current = await read(directory, entry.name);
+      const isBefore = same(current, entry.before), isAfter = same(current, entry.after);
+      if (!isBefore && !isAfter && !(entry.before === null && current?.length === 0)) throw Error(`文件已被其他程序修改，未覆盖：${entry.name}`);
+      before &&= isBefore; after &&= isAfter;
+    }
+    return after ? 'applied' : before ? 'restored' : 'pending';
   }
   async function apply(directory, prepared, currentVersion, saveBackup, progress = () => {}) {
     await checkDirectory(directory, currentVersion);
@@ -136,6 +152,6 @@
       throw Error(`更新失败，已恢复原文件：${error.message}`);
     }
   }
-  root.WorkToolLocalUpdate = {prepare, prepareFiles, manifest, path, compare, checkDirectory, apply, restore};
+  root.WorkToolLocalUpdate = {prepare, prepareFiles, manifest, path, compare, checkDirectory, apply, restore, inspectBackup};
   if (typeof module !== 'undefined' && module.exports) module.exports = root.WorkToolLocalUpdate;
 })(globalThis);

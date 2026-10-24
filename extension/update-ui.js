@@ -9,12 +9,13 @@
   function display() {
     $('directory-status').textContent = directory ? `已选择：${directory.name}` : '尚未选择';
     $('apply-update').disabled = busy || !directory || !prepared || backup?.state === 'pending';
-    for (const id of ['choose-directory','update-zip','restore-update']) $(id).disabled = busy;
+    for (const id of ['choose-directory','update-zip','restore-update','repair-update']) $(id).disabled = busy;
     for (const id of ['save-github','github-url','github-branch','github-folder']) $(id).disabled = busy;
     $('github-check').disabled = busy || !githubConfig || backup?.state === 'pending';
+    $('update-recovery').hidden = backup?.state !== 'pending';
     $('github-status').dataset.available = String(!!githubStatus?.available);
     $('github-status').textContent = !githubConfig ? '尚未配置GitHub更新源' : githubStatus?.state === 'error' ? `检查失败：${githubStatus.error}` :
-      githubStatus?.available ? `发现新版 ${githubStatus.version}，点击“检查并更新”即可安装。` : githubStatus?.state === 'current' ? `当前已是最新版本（仓库版本 ${githubStatus.version}）。` : '尚未检查更新';
+      githubStatus?.available ? `发现新版 ${githubStatus.version}，` + (backup?.state === 'pending' ? '请先修复上次更新，再继续安装。' : '点击“检查并更新”即可安装。') : githubStatus?.state === 'current' ? `当前已是最新版本（仓库版本 ${githubStatus.version}）。` : '尚未检查更新';
     $('restore-section').hidden = !backup || backup.state === 'restored';
     $('backup-status').textContent = backup ? `${backup.from} → ${backup.to}` + (backup.state === 'pending' ? ' · 上次更新中断，请先恢复' : ' · 已保留更新前文件') : '';
   }
@@ -107,11 +108,42 @@
     } catch (error) { notice(error.message); }
     finally { busy = false; display(); }
   };
+  $('repair-update').onclick = async () => {
+    if (busy || backup?.state !== 'pending') return;
+    busy = true; display(); notice('正在核对上次更新的文件…');
+    try {
+      const target = backup.directory || directory;
+      await permission(target);
+      let state = await api.inspectBackup(target, backup);
+      if (state === 'pending') { await api.restore(target, backup); state = 'restored'; }
+      backup = {...backup,state}; await files.state(BACKUP,backup);
+      if (state === 'applied') {
+        notice('上次更新的文件已完整安装，已修复完成记录。正在重新加载扩展，请刷新后台页面。');
+        chrome.runtime.reload();
+      } else {
+        notice('已恢复更新前文件并解除锁定。请重新打开本页，再点击“检查并更新”。');
+        chrome.runtime.reload();
+      }
+    } catch (error) { notice(`修复未完成：${error.message}。原备份已保留。`); }
+    finally { busy = false; display(); }
+  };
   (async () => {
     try {
       [directory, backup] = await Promise.all([files.state(DIRECTORY), files.state(BACKUP)]);
       const result = await send({type:'updates:get'}); githubConfig = result.config; githubStatus = result.status;
       if (githubConfig) { $('github-url').value = githubConfig.url; $('github-branch').value = githubConfig.branch === 'HEAD' ? '' : githubConfig.branch; $('github-folder').value = githubConfig.folder; }
+      // manifest落盘时页面可能被浏览器重载，导致最后的完成记录尚未提交。
+      // 已有权限且全部文件与正在运行的版本一致时，仅补齐记录，不改安装文件。
+      const target = backup?.directory || directory;
+      if (backup?.state === 'pending' && target?.queryPermission && await target.queryPermission({mode:'readwrite'}) === 'granted') {
+        try {
+          const state = await api.inspectBackup(target,backup);
+          if ((state === 'applied' && backup.to === current) || (state === 'restored' && backup.from === current)) {
+            backup = {...backup,state}; await files.state(BACKUP,backup);
+            notice(state === 'applied' ? '已核对上次更新文件完整，更新完成记录已修复。' : '已核对安装文件仍为原版本，可以重新检查更新。');
+          }
+        } catch (error) { notice(`上次更新需要修复：${error.message}。原备份已保留。`); }
+      }
       display();
     }
     catch (error) { notice(error.message); }
