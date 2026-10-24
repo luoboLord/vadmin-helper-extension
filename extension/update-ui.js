@@ -64,10 +64,10 @@
     finally { busy = false; display(); }
   };
   async function install(next) {
-    progress('正在安装',0,next.files.size);
+    progress('正在比较并备份需要更新的文件…');
     const result = await api.apply(directory, next, current, async value => { const saved = {...value, directory}; await files.state(BACKUP, saved); backup = saved; },
       (done, total) => progress('正在安装',done,total));
-    notice(`已安装 ${result.version}，正在重新加载扩展。请刷新后台页面。`);
+    notice(`已安装 ${result.version}（更新 ${result.files} 个文件），正在重新加载扩展。请刷新后台页面。`);
     chrome.runtime.reload();
   }
   $('github-check').onclick = async () => {

@@ -128,21 +128,40 @@
     }
     return after ? 'applied' : before ? 'restored' : 'pending';
   }
+  // 最多limit个任务同时进行；出错后不再开始新任务，等已开始的结束后抛出第一个错误。
+  async function each(items, limit, task) {
+    let next = 0, failed = false, failure;
+    async function worker() {
+      while (!failed && next < items.length) {
+        const item = items[next++];
+        try { await task(item); } catch (error) { if (!failed) { failed = true; failure = error; } }
+      }
+    }
+    await Promise.all(Array.from({length: Math.min(limit, items.length)}, worker));
+    if (failed) throw failure;
+  }
+  const WRITE_CONCURRENCY = 6;
   async function apply(directory, prepared, currentVersion, saveBackup, progress = () => {}) {
     await checkDirectory(directory, currentVersion);
-    const entries = [];
-    for (const [name, bytes] of prepared.files) entries.push({name, before: await read(directory, name), after: bytes});
+    // 内容未变的文件不备份也不重写：每次写盘都较慢（浏览器会检查写入的文件），而多数更新只改少数文件。
+    const compared = await Promise.all([...prepared.files].map(async ([name, bytes]) => ({name, before: await read(directory, name), after: bytes})));
+    const entries = compared.filter(entry => !same(entry.before, entry.after));
     entries.sort((a, b) => (a.name === 'manifest.json') - (b.name === 'manifest.json'));
     const backup = {entries, from:currentVersion, to:prepared.version, state:'pending', createdAt:Date.now()};
     await saveBackup(backup); // 备份写入成功后才能改安装文件。
     try {
-      for (let i = 0; i < entries.length; i++) {
-        const entry = entries[i];
+      let done = 0;
+      progress(done, entries.length);
+      async function install(entry) {
         if (!same(await read(directory, entry.name), entry.before)) throw Error('扩展目录被其他程序修改，请重试');
         await write(directory, entry.name, entry.after);
         if (!same(await read(directory, entry.name), entry.after)) throw Error(`写入校验失败：${entry.name}`);
-        progress(i + 1, entries.length);
+        progress(++done, entries.length);
       }
+      // manifest最后单独写入，其他文件全部写完并校验后才切换版本。
+      const last = entries.at(-1)?.name === 'manifest.json' ? entries.at(-1) : null;
+      await each(last ? entries.slice(0, -1) : entries, WRITE_CONCURRENCY, install);
+      if (last) await install(last);
       await saveBackup({...backup, state:'applied'});
       return {version:prepared.version, files:entries.length};
     } catch (error) {
