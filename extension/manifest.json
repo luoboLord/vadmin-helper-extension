@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "客服链接助手 · 游戏联动",
+  "version": "1.7.0",
+  "description": "跟随已选游戏显示链接，只读同步飞书链接库；新增链接直接打开飞书。保留订单筛选优化及查冠名权。",
+  "permissions": ["storage", "alarms", "clipboardWrite"],
+  "host_permissions": ["https://*.feishu.cn/*", "https://api.github.com/*", "https://raw.githubusercontent.com/*"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_title": "飞书数据管理" },
+  "options_page": "manager.html",
+  "content_scripts": [{
+    "matches": ["https://vadmin.648sy.com/order/ls*", "https://vadmin.648sy.com/game/playerinfo*"],
+    "js": ["data.js", "core.js", "entries.js", "content.js", "role-copy.js"],
+    "run_at": "document_idle"
+  }, {
+    "matches": ["https://vadmin.648sy.com/order/ls*", "https://vadmin.648sy.com/game/playerinfo*"],
+    "js": ["filter-drafts.js"],
+    "run_at": "document_idle",
+    "world": "MAIN"
+  }, {
+    "matches": ["https://vadmin.648sy.com/order/ls*", "https://vadmin.648sy.com/game/playerinfo*"],
+    "js": ["crown-calc.js", "crown-fetch.js", "crown-panel.js"],
+    "run_at": "document_idle"
+  }, {
+    "matches": ["https://vadmin.648sy.com/order/ls*"],
+    "js": ["order-tweaks.js"],
+    "css": ["order-tweaks.css"],
+    "run_at": "document_idle",
+    "world": "MAIN"
+  }]
+}

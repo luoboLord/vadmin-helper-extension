@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>扩展更新 · 客服链接助手</title><link rel="stylesheet" href="manager.css"></head>
+<body><main>
+<header><div class="eyebrow">客服链接助手</div><h1>扩展更新</h1><p>发现新版会提示，点击检查并更新，自动下载和安装。</p></header>
+<section><h2>当前版本</h2><p id="current-version"></p><p id="github-status" role="status">尚未配置GitHub更新源</p><div class="actions"><button id="github-check" disabled>检查并更新</button></div><p class="muted">从GitHub仓库直接读取新版文件，无需Releases和手动下载ZIP。首次授权安装目录后，更新成功会自动重新加载扩展；已打开的后台页面需要刷新。</p></section>
+<section><h2>GitHub更新源</h2><label for="github-url">公开仓库地址</label><input id="github-url" type="url" placeholder="https://github.com/用户名/仓库名"><details><summary>仓库位置设置</summary><p><label for="github-branch">分支（留空使用仓库默认分支）</label><input id="github-branch" type="text"></p><p><label for="github-folder">扩展目录（默认extension；文件放在仓库根目录时留空）</label><input id="github-folder" type="text" value="extension"></p></details><div class="actions"><button id="save-github" class="secondary">保存更新源</button></div><p class="muted">配置后启动浏览器时检查，并每6小时检查一次；有新版时在扩展图标和后台面板提示。尚未创建仓库时可以先留空。</p></section>
+<section><h2>1. 扩展安装位置</h2><p id="directory-status">尚未选择</p><button id="choose-directory" class="secondary">选择已加载的扩展文件夹</button><p class="muted">首次选择Chrome中“加载已解压的扩展程序”所用的文件夹，目录内应直接有manifest.json。之后会记住位置，浏览器可能要求重新授权。请选择正在使用的那一份，避免选到备用副本。</p></section>
+<section><details><summary>离线安装包更新（备用）</summary><p><label for="update-zip">选择下载的新版ZIP</label><input id="update-zip" type="file" accept=".zip,application/zip"></p><p id="package-status">尚未选择安装包</p><div class="actions"><button id="apply-update" disabled>安装更新</button></div></details><p class="muted">所有更新先备份再写入，飞书缓存、共服配置等浏览器数据保留。</p></section>
+<section id="restore-section" hidden><h2>上次更新备份</h2><p id="backup-status"></p><button id="restore-update" class="secondary">恢复更新前文件</button><p class="muted">恢复后会重新加载扩展；此操作用于撤回最近一次本机更新。</p></section>
+<p id="notice" role="status" aria-live="polite"></p><p><a href="manager.html">返回飞书数据管理</a></p>
+</main><script src="vendor/fflate.js"></script><script src="file-store.js"></script><script src="local-update.js"></script><script src="github-update.js"></script><script src="update-ui.js"></script></body></html>

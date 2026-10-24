@@ -1,0 +1,2 @@
+/* 日期点选即应用，“从 / 到”输入框和“取消 / 应用”按钮不再需要。 */
+.daterangepicker .ranges { display: none !important; }

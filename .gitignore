@@ -1,0 +1,9 @@
+*
+!.gitignore
+!README.md
+!extension/
+!extension/**
+**/.DS_Store
+**/Thumbs.db
+**/*.local.*
+**/.env*
