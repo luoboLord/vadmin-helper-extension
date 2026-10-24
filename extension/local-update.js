@@ -141,10 +141,26 @@
     if (failed) throw failure;
   }
   const WRITE_CONCURRENCY = 6;
+  // 已安装版本的files.json列出它自带的文件；格式不对时视为没有清单，不删除任何文件。
+  function fileList(bytes) {
+    try {
+      const names = JSON.parse(decoder.decode(bytes));
+      if (!Array.isArray(names)) return [];
+      return names.filter(name => { try { return typeof name === 'string' && path(name) === name; } catch { return false; } });
+    } catch { return []; }
+  }
   async function apply(directory, prepared, currentVersion, saveBackup, progress = () => {}) {
     await checkDirectory(directory, currentVersion);
     // 内容未变的文件不备份也不重写：每次写盘都较慢（浏览器会检查写入的文件），而多数更新只改少数文件。
     const compared = await Promise.all([...prepared.files].map(async ([name, bytes]) => ({name, before: await read(directory, name), after: bytes})));
+    // 旧版本自带、新版本不再包含的文件一并删除（after为null，同样先备份、可恢复）。
+    // 只删旧清单列出的文件，使用者自己放进目录的其他文件不动。
+    const listed = await read(directory, 'files.json');
+    const dropped = listed ? fileList(listed).filter(name => name !== 'manifest.json' && !prepared.files.has(name)) : [];
+    for (const name of new Set(dropped)) {
+      const before = await read(directory, name);
+      if (before !== null) compared.push({name, before, after: null});
+    }
     const entries = compared.filter(entry => !same(entry.before, entry.after));
     entries.sort((a, b) => (a.name === 'manifest.json') - (b.name === 'manifest.json'));
     const backup = {entries, from:currentVersion, to:prepared.version, state:'pending', createdAt:Date.now()};
@@ -154,7 +170,8 @@
       progress(done, entries.length);
       async function install(entry) {
         if (!same(await read(directory, entry.name), entry.before)) throw Error('扩展目录被其他程序修改，请重试');
-        await write(directory, entry.name, entry.after);
+        if (entry.after === null) await remove(directory, entry.name);
+        else await write(directory, entry.name, entry.after);
         if (!same(await read(directory, entry.name), entry.after)) throw Error(`写入校验失败：${entry.name}`);
         progress(++done, entries.length);
       }
@@ -171,6 +188,6 @@
       throw Error(`更新失败，已恢复原文件：${error.message}`);
     }
   }
-  root.WorkToolLocalUpdate = {prepare, prepareFiles, manifest, path, compare, checkDirectory, apply, restore, inspectBackup};
+  root.WorkToolLocalUpdate = {prepare, prepareFiles, manifest, path, compare, checkDirectory, apply, restore, inspectBackup, read, each};
   if (typeof module !== 'undefined' && module.exports) module.exports = root.WorkToolLocalUpdate;
 })(globalThis);

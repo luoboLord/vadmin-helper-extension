@@ -214,19 +214,30 @@
     main.append(setup, shared, actions, status, progress, results);
 
     start.onclick = async () => {
-      status.replaceChildren(); results.replaceChildren();
-      const thresholdCents = calc.toCents(thresholdValue);
-      if (!thresholdCents || thresholdCents <= 0) { status.append(el('div', 'bad', '请填写大于 0 的充值门槛，最多两位小数。')); return; }
-      const base = info.targets.find(t => t.psid === targetSelect.value);
-      const scope = [{ gid: info.gid, psid: base.psid, name: base.name }];
-      for (const game of config.games) {
-        const psid = game.sameIds ? base.psid : game.map[base.psid];
-        const hit = psid && (await serversOf(game.gid).catch(() => [])).find(s => s.psid === psid);
-        if (!hit) { status.append(el('div', 'bad', `请为共服游戏 ${gameName(game.gid)} 填写有效的对应区服ID。`)); return; }
-        scope.push({ gid: game.gid, psid, name: hit.name });
+      // 核对共服区服和保存设置需要等待，点击后立即禁用，避免连点同时启动两轮扫描。
+      if (start.disabled || task) return;
+      start.disabled = true;
+      let launched = false;
+      try {
+        status.replaceChildren(); results.replaceChildren();
+        const thresholdCents = calc.toCents(thresholdValue);
+        if (!thresholdCents || thresholdCents <= 0) { status.append(el('div', 'bad', '请填写大于 0 的充值门槛，最多两位小数。')); return; }
+        const base = info.targets.find(t => t.psid === targetSelect.value);
+        const scope = [{ gid: info.gid, psid: base.psid, name: base.name }];
+        for (const game of config.games) {
+          const psid = game.sameIds ? base.psid : game.map[base.psid];
+          const hit = psid && (await serversOf(game.gid).catch(() => [])).find(s => s.psid === psid);
+          if (!hit) { status.append(el('div', 'bad', `请为共服游戏 ${gameName(game.gid)} 填写有效的对应区服ID。`)); return; }
+          scope.push({ gid: game.gid, psid, name: hit.name });
+        }
+        await saveConfig(info.gid, config);
+        launched = true;
+        run({ scope, thresholdCents, fullScan: full.checked, start, progress, results, setup, shared, done: renderShared });
+      } catch (error) {
+        status.append(el('div', 'bad', '无法开始查询：' + error.message));
+      } finally {
+        if (!launched) start.disabled = false;
       }
-      await saveConfig(info.gid, config);
-      run({ scope, thresholdCents, fullScan: full.checked, start, progress, results, setup, shared, done: renderShared });
     };
   }
 

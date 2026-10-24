@@ -23,6 +23,17 @@ async function manager(active=true){
   })();
   try{return await opening;}finally{opening=null;}
 }
+// 扩展自己新建的标签不经过标签复用：已打开的同一页面直接切过去，否则新建。
+async function focusOrCreate(url,same){
+  for(const tab of await chrome.tabs.query({})){
+    const current=tab.pendingUrl||tab.url;
+    if(!current||!same(current))continue;
+    await chrome.windows.update(tab.windowId,{focused:true});
+    return chrome.tabs.update(tab.id,{active:true});
+  }
+  return chrome.tabs.create({url,active:true});
+}
+const samePage=target=>current=>{try{const a=new URL(current),b=new URL(target);return a.origin===b.origin&&a.pathname===b.pathname;}catch{return false;}};
 async function refresh(){
   if(refreshing)return refreshing;
   refreshing=(async()=>{
@@ -70,7 +81,7 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
     const isBackend=u.origin==='https://vadmin.648sy.com'&&WorkToolCore.supportedPath(u.pathname);
     if(!isManager&&!isBackend&&!isUpdate)throw Error('此页面不能操作链接库');
     if(message.type==='updates:get')return {ok:true,...await updates.get()};
-    if(message.type==='updates:open'){await chrome.tabs.create({url:chrome.runtime.getURL('update.html'),active:true});return {ok:true};}
+    if(message.type==='updates:open'){const url=chrome.runtime.getURL('update.html');await focusOrCreate(url,samePage(url));return {ok:true};}
     if(message.type==='updates:check'||message.type==='updates:configure'){
       if(!isManager&&!isUpdate)throw Error('请在扩展更新页配置或手动检查更新');
       const status=message.type==='updates:check'?await updates.check(true):await updates.configure(message.config);
@@ -90,7 +101,8 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
           if(src.url===linkSnapshot.source&&/^tbl[A-Za-z0-9]+$/.test(table))target=src.url+'?table='+encodeURIComponent(table);
         }catch{}
       }
-      await chrome.tabs.create({url:target,active:true});return {ok:true};
+      // 同一飞书表格（不论当前在哪个数据表）已打开时切过去，不重复新开。
+      await focusOrCreate(target,samePage(target));return {ok:true};
     }
     if(message.type==='links:save')throw Error('新版请在飞书表格直接新增；点击“＋新增链接”打开新表');
     if(!isManager)throw Error('请在数据管理页修改配置或手动刷新');

@@ -58,11 +58,13 @@
   function raw(source, commit, name) {
     return `https://raw.githubusercontent.com/${encode(source.owner)}/${encode(source.repo)}/${commit}/${[source.folder,name].filter(Boolean).join('/').split('/').map(encode).join('/')}`;
   }
-  async function verify(data, expected) {
+  async function blobSha(data) {
     const prefix = new TextEncoder().encode(`blob ${data.byteLength}\0`), blob = new Uint8Array(prefix.length+data.length);
     blob.set(prefix); blob.set(data,prefix.length);
-    const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-1',blob)),b=>b.toString(16).padStart(2,'0')).join('');
-    if (digest !== expected) throw Error('GitHub文件校验失败，更新未写入');
+    return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-1',blob)),b=>b.toString(16).padStart(2,'0')).join('');
+  }
+  async function verify(data, expected) {
+    if (await blobSha(data) !== expected) throw Error('GitHub文件校验失败，更新未写入');
   }
   async function check(input, currentVersion, {fetchImpl} = {}) {
     const source = config(input), base = `https://api.github.com/repos/${encode(source.owner)}/${encode(source.repo)}`;
@@ -88,15 +90,29 @@
     const manifest = local.manifest(data);
     return {available:local.compare(manifest.version,currentVersion)>0,version:manifest.version,commit:commit.sha,source,sourceKey:key(source),files,checkedAt:Date.now()};
   }
-  async function download(snapshot, currentVersion, {fetchImpl,onProgress=()=>{}} = {}) {
+  const DOWNLOAD_CONCURRENCY = 4;
+  // installed(name)读取已安装目录中的同名文件；大小和Git blob哈希与固定提交一致的文件直接取本地内容，只下载其余文件。
+  async function download(snapshot, currentVersion, {fetchImpl,onProgress=()=>{},installed} = {}) {
     if (!snapshot?.available || !sha(snapshot.commit)) throw Error('请先检查更新');
-    const source = config(snapshot.source), files = new Map(), read = reader(source,fetchImpl);
+    const source = config(snapshot.source), read = reader(source,fetchImpl);
     if (key(source) !== snapshot.sourceKey || !Array.isArray(snapshot.files) || snapshot.files.length > 250) throw Error('更新信息无效，请重新检查');
-    for (const entry of snapshot.files) {
-      local.path(entry.name);
-      const data = await read.file(raw(source,snapshot.commit,entry.name),entry);
-      files.set(entry.name,data); onProgress(files.size,snapshot.files.length);
+    for (const entry of snapshot.files) local.path(entry.name);
+    const results = await Promise.all(snapshot.files.map(async entry => {
+      let data = null;
+      try { data = installed ? await installed(entry.name) : null; } catch {}
+      return data?.length === entry.size && await blobSha(data) === entry.sha ? data : null;
+    }));
+    const missing = snapshot.files.map((entry,i) => results[i] ? null : i).filter(i => i !== null), skipped = snapshot.files.length - missing.length;
+    let done = 0;
+    onProgress(done,missing.length,skipped);
+    async function fetchFile(i) {
+      results[i] = await read.file(raw(source,snapshot.commit,snapshot.files[i].name),snapshot.files[i]);
+      onProgress(++done,missing.length,skipped);
     }
+    // 第一个文件单独下载，确定加速或直连线路后，其余文件并行复用该线路。
+    if (missing.length) await fetchFile(missing[0]);
+    await local.each(missing.slice(1),DOWNLOAD_CONCURRENCY,fetchFile);
+    const files = new Map(snapshot.files.map((entry,i) => [entry.name,results[i]]));
     const prepared = local.prepareFiles(files,currentVersion);
     if (prepared.version !== snapshot.version) throw Error('更新版本不一致，请重新检查');
     return prepared;

@@ -81,8 +81,9 @@
       githubStatus = (await send({type:'updates:check'})).status;
       if (githubStatus?.state === 'error') throw Error(githubStatus.error);
       if (!githubStatus?.available) { $('update-progress').hidden = true; notice('当前已是最新版本。'); return; }
-      progress(`正在下载 ${githubStatus.version}`,0,githubStatus.files?.length);
-      const next = await WorkToolGithub.download(githubStatus, current, {onProgress:(done,total)=>progress(`正在下载 ${githubStatus.version}`,done,total)});
+      progress(`正在比较本地文件，准备下载 ${githubStatus.version}…`);
+      const next = await WorkToolGithub.download(githubStatus, current, {installed:name=>api.read(directory,name),
+        onProgress:(done,total,skipped)=>progress(`正在下载 ${githubStatus.version}${skipped?`（${skipped} 个文件未变化，无需下载）`:''}`,done,total)});
       await install(next);
     } catch (error) { $('update-progress').hidden = true; notice(error.name === 'AbortError' ? '已取消更新。' : error.message); }
     finally { busy = false; display(); }
