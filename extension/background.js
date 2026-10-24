@@ -1,5 +1,6 @@
 'use strict';
-importScripts('data.js','core.js','entries.js','workbook.js','feishu-library.js','local-update.js','github-update.js','update-service.js');
+// service-worker.js imports these as modules first; importScripts is only for classic loading (tests).
+if(!globalThis.WorkToolUpdateService)importScripts('data.js','core.js','entries.js','workbook.js','feishu-library.js','local-update.js','github-update.js','update-service.js');
 const updates = WorkToolUpdateService.create({chrome});
 let opening,refreshing;
 const interval=15*60*1000;
@@ -60,6 +61,8 @@ chrome.alarms.onAlarm.addListener(alarm=>{if(alarm.name==='feishu-refresh')refre
 chrome.action.onClicked.addListener(()=>{manager(true).catch(console.error);});
 chrome.runtime.onMessage.addListener((message,sender,reply)=>{
   if(sender.id!==chrome.runtime.id)return;
+  // Answered by tab-reuse/background/service-worker.js.
+  if(typeof message?.type==='string'&&message.type.startsWith('tab-reuse:'))return;
   (async()=>{
     const isManager=sender.url===chrome.runtime.getURL('manager.html');
     const isUpdate=sender.url===chrome.runtime.getURL('update.html');

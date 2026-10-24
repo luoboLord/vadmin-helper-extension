@@ -1,12 +1,13 @@
 {
   "manifest_version": 3,
   "name": "客服链接助手 · 游戏联动",
-  "version": "1.7.5",
-  "description": "跟随已选游戏显示链接，只读同步飞书链接库；新增链接直接打开飞书。保留订单筛选优化及查冠名权。",
-  "permissions": ["storage", "alarms", "clipboardWrite"],
-  "host_permissions": ["https://*.feishu.cn/*", "https://api.github.com/*", "https://raw.githubusercontent.com/*"],
+  "version": "1.8.0",
+  "description": "跟随已选游戏显示链接，只读同步飞书链接库；新增链接直接打开飞书。保留订单筛选优化及查冠名权；重复打开同一网页时切回已有标签。",
+  "minimum_chrome_version": "121",
+  "permissions": ["storage", "alarms", "clipboardWrite", "tabs", "webNavigation", "scripting"],
+  "host_permissions": ["https://*.feishu.cn/*", "https://docs.qq.com/*", "https://api.github.com/*", "https://raw.githubusercontent.com/*"],
   "optional_host_permissions": ["https://update.cnszxyt.com/*"],
-  "background": { "service_worker": "background.js" },
+  "background": { "service_worker": "service-worker.js", "type": "module" },
   "action": { "default_title": "飞书数据管理" },
   "options_page": "manager.html",
   "content_scripts": [{
@@ -28,5 +29,20 @@
     "css": ["order-tweaks.css"],
     "run_at": "document_idle",
     "world": "MAIN"
+  }, {
+    "matches": ["https://*.feishu.cn/*"],
+    "js": ["tab-reuse/content/feishu-open-hook.js"],
+    "run_at": "document_start",
+    "all_frames": true,
+    "world": "MAIN"
+  }, {
+    "matches": ["https://*.feishu.cn/*"],
+    "js": ["tab-reuse/content/feishu-link-reuse.js"],
+    "run_at": "document_start",
+    "all_frames": true
+  }],
+  "web_accessible_resources": [{
+    "resources": ["tab-reuse/background/url-normalizer.js", "tab-reuse/shared/messages.js"],
+    "matches": ["https://*.feishu.cn/*"]
   }]
 }
