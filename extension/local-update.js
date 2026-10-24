@@ -139,9 +139,9 @@
       for (let i = 0; i < entries.length; i++) {
         const entry = entries[i];
         if (!same(await read(directory, entry.name), entry.before)) throw Error('扩展目录被其他程序修改，请重试');
-        progress(i + 1, entries.length);
         await write(directory, entry.name, entry.after);
         if (!same(await read(directory, entry.name), entry.after)) throw Error(`写入校验失败：${entry.name}`);
+        progress(i + 1, entries.length);
       }
       await saveBackup({...backup, state:'applied'});
       return {version:prepared.version, files:entries.length};

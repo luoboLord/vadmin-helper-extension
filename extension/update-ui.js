@@ -6,6 +6,14 @@
   let directory, prepared, backup, githubConfig, githubStatus, busy = true, packageSequence = 0;
   $('current-version').textContent = current;
   const notice = text => { $('notice').textContent = text; };
+  function progress(text, done, total) {
+    const meter = $('update-progress'); meter.hidden = false;
+    if (total) {
+      const percent = Math.round(done / total * 100);
+      meter.max = 100; meter.value = percent;
+      notice(`${text}：${done}/${total}（${percent}%），请保持本页打开…`);
+    } else { meter.removeAttribute('value'); notice(text); }
+  }
   function display() {
     $('directory-status').textContent = directory ? `已选择：${directory.name}` : '尚未选择';
     $('apply-update').disabled = busy || !directory || !prepared || backup?.state === 'pending';
@@ -15,7 +23,7 @@
     $('update-recovery').hidden = backup?.state !== 'pending';
     $('github-status').dataset.available = String(!!githubStatus?.available);
     $('github-status').textContent = !githubConfig ? '尚未配置GitHub更新源' : githubStatus?.state === 'error' ? `检查失败：${githubStatus.error}` :
-      githubStatus?.available ? `发现新版 ${githubStatus.version}，` + (backup?.state === 'pending' ? '请先修复上次更新，再继续安装。' : '点击“检查并更新”即可安装。') : githubStatus?.state === 'current' ? `当前已是最新版本（仓库版本 ${githubStatus.version}）。` : '尚未检查更新';
+      githubStatus?.available ? `发现新版 ${githubStatus.version}，` + (busy ? '正在处理，请查看下方进度。' : backup?.state === 'pending' ? '请先修复上次更新，再继续安装。' : '点击“检查并更新”即可安装。') : githubStatus?.state === 'current' ? `当前已是最新版本（仓库版本 ${githubStatus.version}）。` : '尚未检查更新';
     $('restore-section').hidden = !backup || backup.state === 'restored';
     $('backup-status').textContent = backup ? `${backup.from} → ${backup.to}` + (backup.state === 'pending' ? ' · 上次更新中断，请先恢复' : ' · 已保留更新前文件') : '';
   }
@@ -53,8 +61,9 @@
     finally { busy = false; display(); }
   };
   async function install(next) {
+    progress('正在安装',0,next.files.size);
     const result = await api.apply(directory, next, current, async value => { const saved = {...value, directory}; await files.state(BACKUP, saved); backup = saved; },
-      (done, total) => notice(`正在安装：${done}/${total}，请保持本页打开…`));
+      (done, total) => progress('正在安装',done,total));
     notice(`已安装 ${result.version}，正在重新加载扩展。请刷新后台页面。`);
     chrome.runtime.reload();
   }
@@ -62,15 +71,17 @@
     if (busy || !githubConfig || backup?.state === 'pending') return;
     busy = true; display();
     try {
+      progress('正在确认安装目录权限…');
       // 目录授权在用户点击时完成，避免网络等待后丢失浏览器的用户手势。
       if (!directory) await chooseDirectory();
-      await permission(); notice('正在检查GitHub更新…');
+      await permission(); progress('正在检查GitHub更新…');
       githubStatus = (await send({type:'updates:check'})).status;
       if (githubStatus?.state === 'error') throw Error(githubStatus.error);
-      if (!githubStatus?.available) { notice('当前已是最新版本。'); return; }
-      const next = await WorkToolGithub.download(githubStatus, current, {onProgress:(done,total)=>notice(`正在下载 ${githubStatus.version}：${done}/${total}…`)});
+      if (!githubStatus?.available) { $('update-progress').hidden = true; notice('当前已是最新版本。'); return; }
+      progress(`正在下载 ${githubStatus.version}`,0,githubStatus.files?.length);
+      const next = await WorkToolGithub.download(githubStatus, current, {onProgress:(done,total)=>progress(`正在下载 ${githubStatus.version}`,done,total)});
       await install(next);
-    } catch (error) { if (error.name !== 'AbortError') notice(error.message); }
+    } catch (error) { $('update-progress').hidden = true; notice(error.name === 'AbortError' ? '已取消更新。' : error.message); }
     finally { busy = false; display(); }
   };
   $('update-zip').onchange = async () => {
@@ -93,7 +104,7 @@
     try {
       await permission();
       await install(prepared);
-    } catch (error) { notice(error.message); }
+    } catch (error) { $('update-progress').hidden = true; notice(error.message); }
     finally { busy = false; display(); }
   };
   $('restore-update').onclick = async () => {
