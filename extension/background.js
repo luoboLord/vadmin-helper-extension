@@ -1,6 +1,6 @@
 'use strict';
 // service-worker.js imports these as modules first; importScripts is only for classic loading (tests).
-if(!globalThis.WorkToolUpdateService)importScripts('data.js','core.js','entries.js','workbook.js','feishu-library.js','local-update.js','github-update.js','update-service.js');
+if(!globalThis.WorkToolUpdateService)importScripts('data.js','core.js','entries.js','workbook.js','feishu-library.js','feishu-sheet.js','source-compare.js','local-update.js','github-update.js','update-service.js');
 const updates = WorkToolUpdateService.create({chrome});
 let opening,refreshing;
 const interval=15*60*1000;
@@ -115,6 +115,16 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
       await chrome.storage.local.set({feishuConfig:{url:src.url,revision:Date.now()+':'+Math.random()}});
       if(refreshing)await refreshing;
       return refresh();
+    }
+    if(message.type==='source:compare'){
+      // 先刷新链接库，刚在飞书补录的内容就不会再列为缺少；刷新失败时用本机缓存对比并说明。
+      const url=WorkToolSourceCompare.source(message.url).url;
+      await chrome.storage.local.set({sourceSheetConfig:{url}});
+      const [sheet,fresh]=await Promise.all([WorkToolSourceCompare.read(url),refresh()]);
+      const {linkSnapshot}=await chrome.storage.local.get('linkSnapshot');
+      if(!linkSnapshot?.data)throw Error((fresh.error?fresh.error+'；':'')+'没有可对比的链接库数据，请先在“当前数据”刷新成功');
+      const result=WorkToolSourceCompare.compare(sheet,linkSnapshot.data);
+      return {ok:true,result:{...result,source:sheet.source,checkedAt:Date.now(),libraryUpdatedAt:linkSnapshot.updatedAt,libraryError:fresh.ok?'':fresh.error}};
     }
     throw Error('不支持的操作');
   })().then(reply,error=>reply({ok:false,error:error.message}));

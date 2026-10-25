@@ -7,6 +7,8 @@ import './core.js';
 import './entries.js';
 import './workbook.js';
 import './feishu-library.js';
+import './feishu-sheet.js';
+import './source-compare.js';
 import './local-update.js';
 import './github-update.js';
 import './update-service.js';

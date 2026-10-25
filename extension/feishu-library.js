@@ -46,9 +46,11 @@
     if(u.protocol!=='https:'||!u.hostname.endsWith('.feishu.cn')||u.username||u.password||u.port||!m)throw Error('请填写 HTTPS 飞书多维表格或知识库地址');
     return {url:u.origin+'/'+m[1]+'/'+m[2],origin:u.origin,kind:m[1],token:m[2]};
   }
-  function wikiBaseToken(html){
+  function wikiBaseToken(html,wikiToken=''){
     // 不使用可能来自旧SSR缓存的SERVER_DATA.meta；只读当前地址的显式注入标识。
-    const matches=[...html.matchAll(/\bwindow\.__injected_wiki_base_token__\s*=\s*["']([A-Za-z0-9]+)["']/g)].map(m=>m[1]);
+    let matches=[...html.matchAll(/\bwindow\.__injected_wiki_base_token__\s*=\s*["']([A-Za-z0-9]+)["']/g)].map(m=>m[1]);
+    // 2026-10起飞书不再注入该标识，改从当前知识库节点信息中成对的 wiki_token / obj_token 读取。
+    if(!matches.length&&/^[A-Za-z0-9]+$/.test(wikiToken))matches=[...html.matchAll(new RegExp('["\']wiki_token["\']\\s*:\\s*["\']'+wikiToken+'["\']\\s*,\\s*["\']obj_token["\']\\s*:\\s*["\']([A-Za-z0-9]+)["\']','g'))].map(m=>m[1]);
     const tokens=[...new Set(matches)];
     if(tokens.length!==1)throw Error('无法确认知识库对应的多维表格，请使用其 /base/ 直达地址');
     return tokens[0];
@@ -58,18 +60,24 @@
     const bytes=Uint8Array.from(atob(b64),c=>c.charCodeAt(0));
     return JSON.parse(await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).text());
   }
-  function value(cell,asURL=false){
+  function value(cell,asURL=false,links=false){
     const v=cell?.value;if(v==null)return '';
     if(typeof v==='string'||typeof v==='number')return clean(v);
+    let before='';
     const segment=s=>{
       if(typeof s==='string')return s;
       if(s&&typeof s==='object'){
+        // 链接栏目里 @ 的飞书文档只有标题是文字：已写“名称 |”时取文档网址，否则写成“标题 | 网址”。
+        if(links&&s.type==='mention'&&typeof s.link==='string'&&/^https?:\/\//i.test(s.link)){
+          if(/\|\s*$/.test(before.split(/\r?\n/).pop()))return s.link;
+          return (clean(s.text)?clean(s.text)+' | ':'')+s.link;
+        }
         const t=asURL?(s.link??s.text):(s.text??s.link);
         if(typeof t==='string')return t;
       }
       throw Error('飞书字段类型不支持，请将字段改成文本或超链接');
     };
-    return clean(Array.isArray(v)?v.map(segment).join(''):segment(v));
+    return clean(Array.isArray(v)?v.reduce((text,s)=>{before=text;return text+segment(s);},''):segment(v));
   }
   function records(table,required){
     const fields=Object.entries(table.fieldMap||{}),names=fields.map(([,f])=>f.name);
@@ -79,7 +87,7 @@
     if(!Number.isInteger(table.recordCount)||table.recordCount!==ids.length||table.recordCount>1000)throw Error('表格未完整读取或超过1000条，已保留旧数据；请勿继续使用不完整结果');
     ids.sort((a,b)=>{const x=ranks[a]??'',y=ranks[b]??'';return x<y?-1:x>y?1:0;});
     const cellValue=(cell,field)=>{
-      if(![3,4].includes(field.type))return value(cell,field.name==='URL');
+      if(![3,4].includes(field.type))return value(cell,field.name==='URL',COMPACT_CATEGORIES.includes(field.name));
       const raw=cell?.value;if(raw==null||raw==='')return '';
       const options=field.property?.options;
       if(!Array.isArray(options))throw Error('选项字段缺少定义：'+field.name);
@@ -152,7 +160,7 @@
     if(src.kind==='wiki'){
       const response=await fetcher(src.url,{credentials:'include',redirect:'manual',cache:'no-store',signal:AbortSignal.timeout(20000)});
       if(!response.ok||response.type==='opaqueredirect')throw Error('知识库解析失败，请先登录飞书并确认访问权限');
-      src=source(src.origin+'/base/'+wikiBaseToken(await response.text()));
+      src=source(src.origin+'/base/'+wikiBaseToken(await response.text(),src.token));
     }
     async function request(tableId='',needBase=false){
       const u=new URL(src.origin+'/space/api/v1/bitable/'+src.token+'/clientvars');

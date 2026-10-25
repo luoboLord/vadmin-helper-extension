@@ -5,8 +5,8 @@
   function format(info, playerPage = false) {
     const roleId = clean(info.roleId), roleName = clean(info.roleName);
     const serverName = server(info.serverName, playerPage);
-    if (!roleId || !roleName || !serverName) throw Error('该行缺少角色ID、角色名或区服名称');
-    return `${roleId}\t${roleName}\t${serverName}`;
+    if (!roleId || !roleName || !serverName) throw Error('该行缺少区服名称、角色名或角色ID');
+    return `${serverName}\t${roleName}\t${roleId}`;
   }
   async function write(text) {
     try {
@@ -51,7 +51,7 @@
     const state = {read,busy:false,cursor:target.style.cursor,color:target.style.color,attributes:{}};
     for (const name of ['title','role','tabindex','aria-label']) state.attributes[name] = target.getAttribute(name);
     target.dataset.workToolRoleCopy = ''; target.style.cursor = 'copy'; target.style.color = '#2859a9';
-    target.title = '点击角色名复制：角色ID、角色名、区服名称';
+    target.title = '点击角色名复制：区服名称、角色名、角色ID';
     target.setAttribute('role','button'); target.setAttribute('tabindex','0');
     target.setAttribute('aria-label',`${clean(read().roleName)}，点击复制角色信息`);
     state.activate = async event => {
