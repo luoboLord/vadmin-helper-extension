@@ -140,7 +140,9 @@
     await Promise.all(Array.from({length: Math.min(limit, items.length)}, worker));
     if (failed) throw failure;
   }
-  const WRITE_CONCURRENCY = 6;
+  // 每个写入的 .js/.html 文件关闭时，Chrome 都要向 Google 安全浏览发一次检查请求，最多等 7 秒；
+  // 访问不到 Google 时几乎每个文件都等满 7 秒。各文件的检查互不依赖，因此全部同时写入，总耗时约等于一次检查。
+  const WRITE_CONCURRENCY = 64;
   // 已安装版本的files.json列出它自带的文件；格式不对或任一项无效时视为没有清单，不删除任何文件。
   function fileList(bytes) {
     try {
@@ -167,20 +169,28 @@
     await saveBackup(backup); // 备份写入成功后才能改安装文件。
     try {
       let done = 0;
-      progress(done, entries.length);
+      // 记录正在写入的文件和每个文件的耗时，安装中显示、安装后保存，便于判断慢在哪里。
+      const started = Date.now(), active = new Set(), times = [];
+      const report = () => progress(done, entries.length, {active: [...active], elapsed: Date.now() - started});
+      report();
       async function install(entry) {
+        const begin = Date.now();
+        active.add(entry.name); report();
         if (!same(await read(directory, entry.name), entry.before)) throw Error('扩展目录被其他程序修改，请重试');
         if (entry.after === null) await remove(directory, entry.name);
         else await write(directory, entry.name, entry.after);
         if (!same(await read(directory, entry.name), entry.after)) throw Error(`写入校验失败：${entry.name}`);
-        progress(++done, entries.length);
+        active.delete(entry.name); times.push({name: entry.name, ms: Date.now() - begin});
+        done++; report();
       }
       // manifest最后单独写入，其他文件全部写完并校验后才切换版本。
       const last = entries.at(-1)?.name === 'manifest.json' ? entries.at(-1) : null;
       await each(last ? entries.slice(0, -1) : entries, WRITE_CONCURRENCY, install);
       if (last) await install(last);
-      await saveBackup({...backup, state:'applied'});
-      return {version:prepared.version, files:entries.length};
+      times.sort((a, b) => b.ms - a.ms);
+      const timing = {ms: Date.now() - started, files: times};
+      await saveBackup({...backup, state:'applied', timing});
+      return {version:prepared.version, files:entries.length, timing};
     } catch (error) {
       // 保留持久备份；即使权限中断导致回退失败，重新打开仍可恢复。
       try { await restore(directory, backup); await saveBackup({...backup, state:'restored'}); }
