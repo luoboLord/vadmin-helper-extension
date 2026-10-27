@@ -88,7 +88,7 @@
   // 订单按创建时间倒序返回；读取期间若有新订单插入导致总数变化，整段重读（最多 3 次）。
   async function readOrders(role, startDate, endDate, { signal, fetchImpl, queryServerId = role.serverId, serverName = null } = {}) {
     for (let round = 0; round < 3; round++) {
-      const seen = new Map();
+      const list = [];
       let total = null, changed = false, otherServerCount = 0;
       for (let start = 0; total === null || start < total; start += ORDER_PAGE) {
         // 与当前 order-filter.js 的 OrderFilter.normalize 输出及 jQuery 数组序列化一致。
@@ -111,10 +111,14 @@
           }
           const parsed = parseOrder(row, { gid: role.gameId, psid: role.serverId });
           if (parsed.error) return { orders: [], complete: false, reason: parsed.error };
-          if (parsed.order) seen.set(parsed.order.orderId, parsed.order);
+          if (parsed.order) list.push(parsed.order);
         }
       }
-      if (!changed) return { orders: [...seen.values()], orderCount: total, otherServerCount, complete: true };
+      if (changed) continue;
+      // 同一订单号内容不一致时不能任取一条，否则可能按错误金额判定达标。
+      const { orders, conflicts } = calc.dedupe(list);
+      if (conflicts.length) return { orders: [], complete: false, reason: `订单号重复但内容不一致：${conflicts.join('、')}` };
+      return { orders, orderCount: total, otherServerCount, complete: true };
     }
     return { orders: [], complete: false, reason: '读取期间订单数量持续变化，请稍后重试' };
   }

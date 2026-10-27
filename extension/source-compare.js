@@ -53,13 +53,14 @@
     if(!ids.includes(sheetId))throw Error('飞书没有返回地址中 sheet 对应的工作表数据，请确认地址');
     return {...S.toRows(await S.decodeSnapshot(snapshot,sheetId)),source:src.url,sheetId};
   }
+  // 路径按段、参数按键值对分别解码后结构化比较：编码差异视为同一链接，但 %2F、%26、%3D 等编码的分隔符不与真实分隔符混淆。
   function urlKey(value){
-    try{const u=new URL(clean(value));return u.protocol+'//'+u.host+decode(u.pathname)+'?'+[...u.searchParams].map(([k,v])=>k+'='+v).join('&')+'#'+decode(u.hash.slice(1));}
+    try{const u=new URL(clean(value));return JSON.stringify([u.protocol,u.host,u.pathname.split('/').map(decode),[...u.searchParams],decode(u.hash.slice(1))]);}
     catch{return clean(value);}
   }
-  // 精简表一格一行“名称 | 网址 | 备注”，名称和备注中的竖线、换行会破坏格式。
+  // 精简表一格一行“名称 | 网址 | 备注”，名称和备注中的竖线、换行会破坏格式；网址中的竖线编码为 %7C，含义不变。
   const part=v=>clean(v).replace(/\s*\|\s*/g,' / ').replace(/\s*[\r\n]+\s*/g,' ');
-  const line=(name,url,note)=>[part(name),url,part(note)].filter(Boolean).join(' | ');
+  const line=(name,url,note)=>[part(name),clean(url).replace(/\|/g,'%7C'),part(note)].filter(Boolean).join(' | ');
   const ORDER=['后台','日志后台','礼包','冠名表','额外表','定制称号','转区转游','扶持','累充','道具ID','其他'];
   function compare(sheet,data){
     const versions=new Map(),owners=new Map();

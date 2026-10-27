@@ -141,12 +141,12 @@
     if (failed) throw failure;
   }
   const WRITE_CONCURRENCY = 6;
-  // 已安装版本的files.json列出它自带的文件；格式不对时视为没有清单，不删除任何文件。
+  // 已安装版本的files.json列出它自带的文件；格式不对或任一项无效时视为没有清单，不删除任何文件。
   function fileList(bytes) {
     try {
       const names = JSON.parse(decoder.decode(bytes));
       if (!Array.isArray(names)) return [];
-      return names.filter(name => { try { return typeof name === 'string' && path(name) === name; } catch { return false; } });
+      return names.every(name => typeof name === 'string' && path(name) === name) ? names : [];
     } catch { return []; }
   }
   async function apply(directory, prepared, currentVersion, saveBackup, progress = () => {}) {

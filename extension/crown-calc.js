@@ -135,7 +135,7 @@
 
   // 共服设置双向保存：在主游戏 base 保存 next 后，同步更新每个共服游戏自己的设置，
   // 让从任一游戏打开都能带出同组其他游戏。configs 为 {游戏ID: {games:[{gid, sameIds, map:{本游戏区服ID: 对方区服ID}}]}}。
-  // 只改与本组相关的条目，各游戏另外的共服设置保持不变；从 base 移除的游戏也会删掉它指回 base 的条目。
+  // 只改与本组相关的条目（按 base 当前设置整体替换），各游戏另外的共服设置保持不变；从 base 移除的游戏也会删掉它指回 base 的条目。
   function linkShared(configs, base, next) {
     const copy = config => ({ games: (config?.games || []).map(g => ({ gid: String(g.gid), sameIds: !!g.sameIds, map: { ...(g.map || {}) } })) });
     const out = {};
@@ -167,8 +167,9 @@
         const link = relation(member, other);
         let entry = config.games.find(g => g.gid === other.gid);
         if (!entry) { entry = { gid: other.gid, sameIds: false, map: {} }; config.games.push(entry); }
+        // 组内关系全部由 base 的完整映射重新换算，整体替换，避免改动或删除后残留旧的区服对应。
         entry.sameIds = link.sameIds;
-        Object.assign(entry.map, link.map);
+        entry.map = link.map;
       }
       out[member.gid] = config;
     }
