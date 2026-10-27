@@ -1,5 +1,6 @@
 'use strict';
 const $=id=>document.getElementById(id);
+$('runtime-version').textContent='当前运行版本：'+(chrome.runtime.getManifest?.().version||'未知');
 const notice=text=>{$('notice').textContent=text;};
 const stamp=time=>time?new Date(time).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai'}):'尚未同步';
 async function displayUpdate(){
@@ -35,6 +36,12 @@ function renderCompare(r){
   const library=r.libraryError?'链接库刷新失败（'+r.libraryError+'），已用本机缓存 '+stamp(r.libraryUpdatedAt)+' 对比':'链接库已刷新 · '+stamp(r.libraryUpdatedAt);
   const missing=c.missingLinks+c.publicMissing;
   $('compare-status').textContent=(missing||c.newGames?`原表共 ${c.sourceLinks} 条链接，链接库缺少 ${c.missingLinks} 条游戏链接${c.newGames?'（含新游戏 '+c.newGames+' 款）':''}${c.publicMissing?'、'+c.publicMissing+' 条公共链接':''}。`:`链接库已包含原表全部 ${c.sourceLinks} 条链接，无需补录。`)+'\n'+library;
+  if(r.serverChanges?.length){
+    $('compare-status').textContent=`网址对比：缺少 ${c.missingLinks} 条游戏链接、${c.publicMissing} 条公共链接；另有 ${r.serverChanges.length} 款游戏的专服名称不同。请核对下方明细，再点“对比并写入新增”确认改名。\n`+library;
+    const section=el('div','compare-group');section.append(el('h3',null,'专服名称差异（此处只读，尚未修改）'));
+    for(const x of r.serverChanges)section.append(el('p','server-audit',`${x.full}\n原表：${x.source.join(' / ')||'共用'}\n链接库：${x.library.join(' / ')||'共用'}`));
+    box.append(section);
+  }
   if(r.tsv){const top=el('div','actions');top.append(copyButton('复制全部清单（表格）',r.tsv));box.append(top);}
   if(r.newGames.length){
     const section=el('div','compare-group');section.append(el('h3',null,'新游戏：先在“游戏配置”新增'));
@@ -62,48 +69,66 @@ $('compare').onclick=async()=>{
   catch(error){$('compare-status').textContent=error.message;}
   finally{button.disabled=false;}
 };
-// 写入新增：后台生成清单后在此确认；执行、核实和恢复都在后台，关闭本页不中断，重新打开可查看。
+// 同步：后台以原表为准逐款游戏对比，在此勾选确认；执行、核实和恢复都在后台，关闭本页不中断，重新打开可查看。
 let syncJob=null,syncTimer=null;
-const syncLabel={pending:'未执行',failed:'失败',conflict:'内容不一致',blocked:'未执行（依赖失败）',unknown:'结果未知',skipped:'已跳过',cancelled:'已放弃'};
+const kindLabel={new:'新游戏',update:'更新',rename:'改名',remove:'原表已删除',public:'公共链接'};
+const stateLabel={pending:'未执行',done:'已完成',problem:'有问题',skipped:'已跳过',cancelled:'已放弃',excluded:'未勾选'};
 function syncButton(label,handler,secondary=true){const b=el('button',secondary?'secondary small':'small',label);b.type='button';b.onclick=async()=>{b.disabled=true;try{await handler();}catch(error){$('sync-status').textContent=error.message;}finally{b.disabled=false;}};return b;}
+function linkButton(label,url){const a=el('a','button secondary small',label);a.href=url;a.target='_blank';a.rel='noopener noreferrer';return a;}
+function list(title,items,className){if(!items?.length)return null;const box=el('div','change-list '+className);box.append(el('strong',null,title+'（'+items.length+'）'));const ul=el('ul');for(const x of items)ul.append(el('li',null,x));box.append(ul);return box;}
+function gameCard(job,g){
+  const card=el('div','sync-game'),head=el('label','sync-game-head'),box=el('input');box.type='checkbox';box.checked=g.selected;box.dataset.game=g.key;box.disabled=job.state!=='ready';
+  box.onchange=()=>updateConfirm(job);
+  head.append(box,el('span','badge',kindLabel[g.kind]||g.kind),el('span','sync-game-name',g.kind==='rename'?g.from+' → '+g.full:g.full));
+  if(job.state!=='ready')head.append(el('span','muted',' · '+(stateLabel[g.state]||g.state)));
+  card.append(head);
+  for(const part of [list('新增',g.added,'add'),list('删除（原表已没有）',g.removed,'remove'),list('专服变化',g.servers,'server'),list('名称/备注修改',g.edited,'edit')])if(part)card.append(part);
+  if(g.merged)card.append(el('p','muted',`另有 ${g.merged} 行重复或过时的行将标为“待核对”（插件不再使用，确认后可在飞书删除）。`));
+  for(const e of g.errors||[])card.append(el('p','error',e));
+  return card;
+}
+function updateConfirm(job){
+  const n=[...document.querySelectorAll('#sync-result input[data-game]')].filter(b=>b.checked).length,b=$('sync-confirm');
+  if(b){b.disabled=!n;b.textContent=n?`确认写入（${n} 款）`:'请至少勾选一款';}
+}
 function renderSync(job){
   syncJob=job;const box=$('sync-result');box.replaceChildren();
   const running=!!job?.running;
   for(const id of ['sync','compare','save-source'])$(id).disabled=running;
   clearTimeout(syncTimer);if(running)syncTimer=setTimeout(()=>pollSync().catch(()=>{}),1500);
   if(!job){$('sync-status').textContent='';return;}
-  const p=job.planned,d=job.done,plan=`${p.rows} 行链接库补充行（${p.links} 条链接、${p.notes} 条备注${p.public?'、'+p.public+' 条公共链接':''}）${p.configs?'、'+p.configs+' 行新游戏配置':''}`;
+  const games=job.games||[],d=job.done,sum=k=>games.filter(g=>g.selected).reduce((n,g)=>n+(g[k]?.length||0),0);
   let text;
-  if(job.state==='ready')text=`待确认：将向 ${job.source} 新增 ${plan}；跳过 ${p.skipped} 项，已存在 ${p.existing} 项。请核对后点“确认写入”。`;
-  else if(job.state==='running'&&running)text=`正在${job.phase}…已核实 ${d.rows+d.configs} / ${p.rows+p.configs} 行。可关闭本页，写入在后台继续。`;
+  if(job.state==='ready')text=`以客服资料大全为准，有 ${games.length} 款需要更新链接库：新增 ${sum('added')} 条、删除 ${sum('removed')} 条过时链接、${sum('servers')} 条专服变化，合并 ${games.reduce((n,g)=>n+g.merged,0)} 行重复行。\n请逐款核对，不想改的取消勾选，再点“确认写入”。读取时间：${stamp(job.createdAt)}`;
+  else if(job.state==='running'&&running)text=`正在${job.phase}…已核实 ${d.verified} / ${d.total} 项。可关闭本页，写入在后台继续。`;
   else if(job.state==='running')text='上次写入在执行中被中断（浏览器或扩展重启）。点“恢复”先核查已提交的记录，再继续写入。';
-  else if(job.state==='paused')text='写入已暂停：'+(job.pause?.message||'原因未知');
+  else if(job.state==='paused')text='写入已暂停：'+(job.pause?.message||'原因未知')+`\n已核实 ${d.verified} / ${d.total} 项。`;
   else if(job.state==='cancelled')text='该写入任务已放弃。';
-  else if(job.phase==='无需写入')text=`链接库已包含原表全部可自动补录的内容，无需写入${p.skipped?'；另有 '+p.skipped+' 项需人工处理（见下方）':''}。`;
-  else text=`写入完成：已核实 ${d.links} 条链接、${d.notes} 条备注${d.public?'、'+d.public+' 条公共链接':''}；实际新增 ${d.rows} 行${d.configs?'及 '+d.configs+' 行游戏配置':''}。跳过 ${p.skipped+d.skipped} 项，失败 ${d.failed} 行，结果未知 ${d.unknown} 行。`;
+  else if(job.phase==='无需写入')text=`链接库与客服资料大全一致，无需修改。读取时间：${stamp(job.createdAt)}`;
+  else text=`写入完成：已核实 ${d.verified} / ${d.total} 项${d.skipped?'，跳过 '+d.skipped+' 项':''}${d.failed?'，失败 '+d.failed+' 项':''}${d.unknown?'，结果未知 '+d.unknown+' 项':''}。`+
+    (games.some(g=>g.selected&&g.merged)?'\n重复或过时的行已标为“待核对”，插件不再使用；可在链接库按“状态 = 待核对”筛选后删除。':'');
   if(job.state==='done'&&job.cache)text+='\n'+(job.cache.ok?'插件缓存已刷新。':'写入结果已核实，但插件缓存刷新失败（'+job.cache.error+'），请稍后点“立即刷新”；已写入的内容不受影响。');
   else if(job.state==='done'&&job.phase==='刷新缓存')text+='\n正在刷新插件缓存…';
-  if(job.state==='done'&&job.phase!=='无需写入')text+='\n旧的“对比并列出新增”仍可能把停用、待核对或已跳过的项目列为缺少。';
   $('sync-status').textContent=text;
   const actions=el('div','actions');
-  if(job.state==='ready')actions.append(syncButton('确认写入',async()=>renderSync((await send({type:'source:sync:run',id:job.id})).job),false),syncButton('取消',async()=>renderSync((await send({type:'source:sync:abandon',id:job.id})).job)));
-  if(!running&&job.state==='done'&&job.done.unknown)actions.append(syncButton('再次核查未知结果',async()=>renderSync((await send({type:'source:sync:resume',id:job.id})).job),false));
-  if(!running&&['paused','running'].includes(job.state))actions.append(syncButton('恢复',async()=>renderSync((await send({type:'source:sync:resume',id:job.id})).job),false),syncButton('放弃任务',async()=>{if(confirm('放弃后未执行的行不再写入；已提交但未核实的行仍列为“结果未知”。确定放弃？'))renderSync((await send({type:'source:sync:abandon',id:job.id})).job);}));
+  if(job.state==='ready'){
+    const confirmButton=syncButton('确认写入',async()=>{
+      const skip=[...document.querySelectorAll('#sync-result input[data-game]')].filter(b=>!b.checked).map(b=>b.dataset.game);
+      renderSync((await send({type:'source:sync:run',id:job.id,skip})).job);
+    },false);confirmButton.id='sync-confirm';
+    actions.append(confirmButton,syncButton('取消',async()=>renderSync((await send({type:'source:sync:abandon',id:job.id})).job)));
+  }
+  if(!running&&job.state==='done'&&d.unknown)actions.append(syncButton('再次核查未知结果',async()=>renderSync((await send({type:'source:sync:resume',id:job.id})).job),false));
+  if(!running&&['paused','running'].includes(job.state))actions.append(syncButton('恢复',async()=>renderSync((await send({type:'source:sync:resume',id:job.id})).job),false),syncButton('放弃任务',async()=>{if(confirm('放弃后未执行的项不再写入；已提交但未核实的仍列为“结果未知”。确定放弃？'))renderSync((await send({type:'source:sync:abandon',id:job.id})).job);}));
+  if(job.libraryURL)actions.append(linkButton('打开链接库',job.libraryURL));
   if(job.phase!=='无需写入')actions.append(syncButton('下载备份 JSON',async()=>{
     const {backup}=await send({type:'source:sync:backup',id:job.id}),a=document.createElement('a'),url=URL.createObjectURL(new Blob([JSON.stringify(backup,null,1)],{type:'application/json'}));
     a.href=url;a.download='飞书写入备份-'+new Date(backup.createdAt).toISOString().slice(0,19).replace(/[:T]/g,'-')+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),30000);
   }));
-  if(actions.childElementCount)box.append(actions);
-  if(job.problems.length){
-    const section=el('div','compare-group');section.append(el('h3',null,'需要处理的行'));
-    for(const x of job.problems)section.append(el('p','muted',`${x.table==='settings'?'游戏配置':'链接库'} · ${x.full}${x.server?' · '+x.server:''}：${syncLabel[x.state]||x.state}${x.error?'，'+x.error:''}`));
-    box.append(section);
-  }
-  if(job.skipped.length){
-    const details=el('details','compare-group');details.append(el('summary',null,`跳过的 ${job.skipped.length} 项（需人工确认）`));
-    for(const x of job.skipped)details.append(el('p','muted',`${x.full}${x.server?' · '+x.server:''} · ${x.category} · ${x.name}${x.url?' · '+x.url:''}：${x.reason}`));
-    box.append(details);
-  }
+  box.append(actions);
+  for(const g of games)box.append(gameCard(job,g));
+  if(job.warnings?.length)box.append(el('p','muted','原表提示：'+job.warnings.join('；')+'（图片和附件不会同步，请在飞书手动维护）。'));
+  if(job.state==='ready')updateConfirm(job);
 }
 async function pollSync(){renderSync((await send({type:'source:sync:status'})).job);}
 $('sync').onclick=async()=>{

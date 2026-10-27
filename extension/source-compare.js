@@ -1,6 +1,6 @@
 (function(root){
   'use strict';
-  // 只读对比原表“客服资料大全”和链接库：列出链接库还没有的游戏和链接，供人工补录；不写任何飞书表格。
+  // 只读对比原表与链接库：列出缺少的游戏、链接及专服名称差异，不写飞书。
   const clean=v=>String(v??'').trim();
   const norm=v=>clean(v).normalize('NFKC').toLowerCase().replace(/\s+/g,'');
   const decode=v=>{try{return decodeURIComponent(v);}catch{return v;}};
@@ -63,9 +63,10 @@
   const line=(name,url,note)=>[part(name),clean(url).replace(/\|/g,'%7C'),part(note)].filter(Boolean).join(' | ');
   const ORDER=['后台','日志后台','礼包','冠名表','额外表','定制称号','转区转游','扶持','累充','道具ID','其他'];
   function compare(sheet,data){
-    const versions=new Map(),owners=new Map();
+    const versions=new Map(),owners=new Map(),serverScopes=new Map(),C=root.WorkToolCore;
     for(const game of data?.games||[])for(const v of Object.values(game.versions||{})){
       const urls=new Set(v.links.map(l=>urlKey(l.url)));versions.set(norm(v.full),urls);
+      if(C)serverScopes.set(norm(v.full),[...new Set([...v.links.map(l=>l.server),...(v.notes||[]).map(n=>n[0])].filter(s=>!C.isShared(s)).flatMap(s=>C.splitServers(s)))]);
       for(const u of urls){if(!owners.has(u))owners.set(u,new Set());owners.get(u).add(v.full);}
     }
     const groups=new Map();let sourceLinks=0,missingLinks=0;
@@ -99,7 +100,12 @@
       for(const note of g.notes)tsv.push([g.full,g.server,'游戏备注',note,'',''].join('\t'));
     }
     for(const l of publicLinks)tsv.push(['','','公共链接',l.name,l.url,''].join('\t'));
-    return {groups:list,newGames,public:publicLinks,tsv:tsv.length>1?tsv.join('\n'):'',warnings:sheet.warnings||[],
+    const serverChanges=C?Object.entries(sheet.serverRoster||{}).flatMap(([full,source])=>{
+      const library=serverScopes.get(norm(full));if(!library)return [];
+      const names=source.filter(s=>!C.isShared(s)).flatMap(s=>C.splitServers(s)),keys=list=>new Set(list.map(C.serverKey)),a=keys(names),b=keys(library);
+      return [...a].some(k=>!b.has(k))||[...b].some(k=>!a.has(k))?[{full,source:names,library}]:[];
+    }):[];
+    return {groups:list,newGames,serverChanges,public:publicLinks,tsv:tsv.length>1?tsv.join('\n'):'',warnings:sheet.warnings||[],
       counts:{sourceLinks,missingLinks,newGames:newGames.length,publicMissing:publicLinks.length}};
   }
   const api={source,extractSnapshot,read,urlKey,norm,part,line,ORDER,compare};

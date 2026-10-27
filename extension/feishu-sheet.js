@@ -62,7 +62,7 @@
       if(kind===3)return {text:at(plain,index,'文字池'),links:[]};
       if(kind!==6)throw Error('未知单元格类型 '+kind);
       const item=wire(at(rich,index,'富文本池')),text=at(plain,one(item,1),'富文本原文');
-      const links=[];let start=0;
+      const links=[];let start=0,attachment=false;
       for(const b of all(item,2)){
         const segment=wire(b),type=one(segment,1),end=one(segment,2);
         if(end<=start||end>text.length)throw Error('富文本片段范围无效');
@@ -73,7 +73,7 @@
           const mention=wire(at(mentions,one(ref,2),'文档表'));
           if(one(mention,1)!==2)throw Error('未知文档引用类型');
           target=utf8.decode(one(wire(one(mention,3)),2));
-        }else if(type===3){at(attachments,one(segment,4),'附件表');warnings.push('附件保留名称作为备注');}
+        }else if(type===3){at(attachments,one(segment,4),'附件表');attachment=true;warnings.push('附件保留名称作为备注');}
         else if(type!==1)throw Error('未知富文本片段类型 '+type);
         if(target){
           url(target);
@@ -84,7 +84,7 @@
         start=end;
       }
       if(start!==text.length)throw Error('富文本片段没有覆盖完整文字');
-      return {text,links};
+      return {text,links,...(attachment?{attachment:true}:{})};
     });
     for(let n=0;n<indices.length;n++){
       const cell=at(decoded,indices[n],'格子描述');
@@ -147,6 +147,7 @@
       merged.warnings.push(...parsed.warnings);
     }
     merged.warnings=[...new Set(merged.warnings)];
+    merged.complete=true; // 已验证目标工作表元数据列出的全部数据块。
     return merged;
   }
   const categories=['后台','日志后台','礼包','冠名表','额外表','定制称号','转区转游','扶持','累充','道具ID','其他'];
@@ -159,7 +160,7 @@
   }
   function splitGame(full){const m=/^(.*?)[（(](.*?)[）)]\s*(.*)$/.exec(full);return m?[m[1].trim(),[m[2].trim(),m[3].trim()].filter(Boolean).join(' ')]:[full,''];}
   function toRows(sheet){
-    const cells=new Map(sheet.cells.map(c=>[c.row+','+c.col,c])),merges=new Map(),rows=[],origins=[],publicLinks=[],channels=[];
+    const cells=new Map(sheet.cells.map(c=>[c.row+','+c.col,c])),merges=new Map(),rows=[],origins=[],publicLinks=[],channels=[],serverRoster=Object.create(null),gameIssues=Object.create(null);
     const get=(r,c)=>cells.get(r+','+c)||{text:'',links:[]};
     for(const range of sheet.merges){
       const {rowStart:r1,rowEnd:r2,colStart:c1,colEnd:c2}=range;
@@ -181,27 +182,37 @@
       const nameLines=lines(get(start,0).text);
       if(!nameLines.length){start++;continue;}
       const full=nameLines[0],[game,version]=splitGame(full),aNote=nameLines.slice(1).join(' '),end=merges.get(start+',0')?.rowEnd??start+1;
+      // 名单包括没有链接的专服，不能仅从成功解析出的链接推断整款游戏的专服范围。
+      if(!serverRoster[full])serverRoster[full]=[];
+      // 图片/附件只阻止所属游戏的自动改名，不能让其他游戏的完整数据失效。
+      const issues=sheet.cells.filter(c=>c.row>=start&&c.row<end&&(c.image||c.attachment));
+      if(issues.length)gameIssues[full]=[...new Set([...(gameIssues[full]||[]),...issues.map(c=>c.image?'本游戏含图片单元格，无法完整核对内容':'本游戏含附件，需人工核对内容')])];
+      for(let r=start;r<end;r++)for(const s of lines(get(merges.get(r+',1')?.rowStart??r,1).text))if(!serverRoster[full].includes(s))serverRoster[full].push(s);
       if(aNote)add([game,version,full,'','备注',aNote,'',''],start,0);
+      // 跨多个游戏合并的格子（如同一后台覆盖几个版本）按游戏分别计入，专服只取本游戏范围内的行。
+      const seen=new Set();
       for(let r=start;r<end;r++)for(let c=2;c<sheet.bounds.colEnd;c++){
-        const cell=get(r,c),textLines=lines(cell.text);
+        const merged=merges.get(r+','+c),top=merged?.rowStart??r;if(seen.has(top+','+c))continue;seen.add(top+','+c);
+        const cell=get(top,c),textLines=lines(cell.text);
         if(!textLines.length&&!cell.links.length)continue;
-        const merged=merges.get(r+','+c),r1=merged?.rowStart??r,r2=merged?.rowEnd??r+1,servers=[];
+        const r1=Math.max(top,start),r2=Math.min(merged?.rowEnd??top+1,end),servers=[];
         for(let sr=r1;sr<r2;sr++)for(const server of lines(get(merges.get(sr+',1')?.rowStart??sr,1).text))if(!servers.includes(server))servers.push(server);
         const server=servers.join('/');
-        if(!cell.links.length){add([game,version,full,server,'备注',textLines.join(' '),'',''],r,c);continue;}
+        if(!cell.links.length){add([game,version,full,server,'备注',textLines.join(' '),'',''],top,c);continue;}
         const entries=cell.links.map(link=>({name:lines(link.name)[0]||'',url:clean(link.url)})),names=new Set(entries.slice(1).map(e=>e.name));
         const note=textLines.slice(1).filter(line=>!names.has(line)).join(' / ');
         entries.forEach((entry,index)=>{
           let category=index===0?categorize(c,entry.name):categorize(-1,entry.name);
           if(category==='其他'&&index>0)category=categorize(c,entry.name);
           let name=entry.name||category;if(c===2&&name==='后台地址')name='后台';
-          add([game,version,full,server,category,name,entry.url,note],r,c);
+          add([game,version,full,server,category,name,entry.url,note],top,c);
         });
       }
       start=end;
     }
     if(!rows.some(r=>r[6]))throw Error('原表解析没有可用链接');
-    return {rows,origins,public:publicLinks,channels,warnings:sheet.warnings};
+    const rosterUnreadable=sheet.cells.some(c=>c.row>=2&&c.col<2&&(c.image||c.attachment));
+    return {rows,origins,public:publicLinks,channels,warnings:sheet.warnings,serverRoster,gameIssues,complete:sheet.complete===true&&!rosterUnreadable};
   }
   const api={wire,packed,parseBlock,parseMerges,sheetIds,sheetNames,decodeSnapshot,toRows,categorize,splitGame,lines,norm,categories};
   root.WorkToolFeishuSheet=api;if(typeof module!=='undefined')module.exports=api;

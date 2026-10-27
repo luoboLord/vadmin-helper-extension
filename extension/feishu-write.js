@@ -1,6 +1,6 @@
 (function(root){
   'use strict';
-  // 飞书页面写入通道：在已登录的飞书标签 MAIN 环境调用页面同源的 HTTP 备用接口，只允许新增一条记录。
+  // 飞书页面写入通道：新增单条记录，或整格覆盖一条已有记录的若干格子。
   // CSRF 只在页面内临时读取，不返回、不保存；载荷不含任何认证信息。
   const ALPHABET='abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
   const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -14,15 +14,22 @@
     let bin='';for(const b of new Uint8Array(buf))bin+=String.fromCharCode(b);
     return btoa(bin);
   }
+  // 单元格只允许文字/网址分段、单选选项编号或数字，字段编号必须来自本次读到的字段定义（由调用方校验）。
+  const validCell=c=>c?.type===1?Array.isArray(c.value)&&c.value.every(s=>(s?.type==='text'||s?.type==='url')&&typeof s.text==='string'&&(s.type==='text'?s.link==null:typeof s.link==='string'&&/^https?:\/\//i.test(s.link)))
+    :c?.type===3?typeof c.value==='string':c?.type===2&&Number.isFinite(c.value);
   // 完整请求载荷在提交前持久化；恢复时原样重发，由 signature 和 recordId 两层去重。
-  async function payload({base,tableId,recordId:id,cells,rev,rank,member,signature}){
+  // set：整格覆盖已有记录的若干格子；否则新增一条记录。
+  async function payload({base,tableId,recordId:id,cells,rev,rank,member,signature,set=false}){
     if(!/^[A-Za-z0-9]+$/.test(base)||!/^tbl[A-Za-z0-9]+$/.test(tableId)||!/^rec[A-Za-z0-9]{13}$/.test(id))throw Error('写入目标无效');
+    const entries=Object.entries(cells||{});
+    if(!entries.length||entries.some(([fid,c])=>!/^fld[A-Za-z0-9]+$/.test(fid)||!validCell(c)))throw Error('写入内容无效');
     const data={cellData:cells};if(rank)data.tableRank=rank;
-    const ops=[{command:'AddRecordV2',type:2,actions:[{action:'data.addRecordV2',type:2,tableId,recordId:id,data}],syncFlag:0}];
+    const ops=[set?{command:'SetRecord',type:2,actions:[{action:'data.setRecord',type:2,tableId,recordId:id,data:cells}],syncFlag:0}
+      :{command:'AddRecordV2',type:2,actions:[{action:'data.addRecordV2',type:2,tableId,recordId:id,data}],syncFlag:0}];
     return {type:'BITABLE_TABLE',data:{member_id:member,user_ticket:'',type:'USER_CHANGES',token:tableId,lang:'zh',suiteLang:'zh',localRev:rev,
       operations:await gzip64(JSON.stringify(ops)),signature,content_type:'gzip/base64',route_key:base},version:2,req_id:1,context:{os:'windows',platform:'web'}};
   }
-  // 注入页面执行，必须自包含。只接受单条 AddRecordV2，地址固定，不能用来请求任意地址。
+  // 注入页面执行，必须自包含。只接受单条记录的 AddRecordV2 或 SetRecord，地址固定，不能用来请求任意地址。
   async function pageSend(request){
     try{
       if(location.origin!==request?.origin)return {error:'origin'};
@@ -31,7 +38,9 @@
       const bytes=Uint8Array.from(atob(d.operations),c=>c.charCodeAt(0));
       const ops=JSON.parse(await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).text());
       const a=ops?.[0]?.actions?.[0];
-      if(!Array.isArray(ops)||ops.length!==1||ops[0].command!=='AddRecordV2'||ops[0].actions.length!==1||a.action!=='data.addRecordV2'||a.tableId!==d.token||!/^rec[A-Za-z0-9]{13}$/.test(a.recordId||''))return {error:'operation'};
+      const add=ops?.[0]?.command==='AddRecordV2'&&a?.action==='data.addRecordV2'&&a.data?.cellData&&typeof a.data.cellData==='object';
+      const set=ops?.[0]?.command==='SetRecord'&&a?.action==='data.setRecord'&&a.data&&typeof a.data==='object'&&Object.keys(a.data).length>0;
+      if(!Array.isArray(ops)||ops.length!==1||!(add||set)||ops[0].actions.length!==1||a.tableId!==d.token||!/^rec[A-Za-z0-9]{13}$/.test(a.recordId||''))return {error:'operation'};
       const csrf=decodeURIComponent((document.cookie.match(/(?:^|;\s*)_csrf_token=([^;]+)/)||[])[1]||'');
       if(!csrf)return {csrf:true};
       let response;

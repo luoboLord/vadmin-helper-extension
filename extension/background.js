@@ -136,7 +136,7 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
       await chrome.storage.local.set({sourceSheetConfig:{url}});
       return {ok:true,job:await sync.prepare(url)};
     }
-    if(message.type==='source:sync:run')return {ok:true,job:await sync.run(message.id)};
+    if(message.type==='source:sync:run')return {ok:true,job:await sync.run(message.id,message.skip||[])};
     if(message.type==='source:sync:resume')return {ok:true,job:await sync.resume(message.id)};
     if(message.type==='source:sync:abandon')return {ok:true,job:await sync.abandon(message.id)};
     if(message.type==='source:sync:status')return {ok:true,job:await sync.status()};
