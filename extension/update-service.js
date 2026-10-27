@@ -1,6 +1,7 @@
 (function(root) {
   'use strict';
-  const DEFAULT_CONFIG = {url:'https://github.com/luoboLord/vadmin-helper-extension',branch:'HEAD',folder:'extension'};
+  // 默认优先走自建加速线路（失败自动直连）；加速域名已在 manifest 的 host_permissions 中，无需再弹授权。
+  const DEFAULT_CONFIG = {url:'https://github.com/luoboLord/vadmin-helper-extension',branch:'HEAD',folder:'extension',accelerated:true};
   function create({chrome, github = root.WorkToolGithub, now = Date.now, defaultConfig = DEFAULT_CONFIG}) {
     const current = () => chrome.runtime.getManifest().version;
     let running;

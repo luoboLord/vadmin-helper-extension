@@ -1,14 +1,58 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>飞书数据管理 · 客服链接助手</title><link rel="stylesheet" href="manager.css"><link rel="stylesheet" href="tab-reuse/panel.css"></head>
-<body><main>
-<header><div class="eyebrow">客服链接助手</div><h1>飞书数据管理</h1><p>在飞书维护链接，已安装的插件自动读取更新。</p><p id="runtime-version" class="muted"></p></header>
-<section><h2>扩展程序更新</h2><p id="extension-update-status">正在检查更新状态…</p><p><a class="button" href="update.html">检查并更新</a></p><p class="muted">配置GitHub仓库后，有新版会提示，点击自动下载和安装；无需手动下载或选择ZIP。</p></section>
-<section id="tab-reuse"><div class="status-row"><div><h2>标签复用</h2><p id="tab-reuse-status" class="muted">正在读取状态…</p></div><label class="switch"><span class="sr-only">启用标签复用</span><input id="tab-reuse-enabled" type="checkbox" disabled><span class="switch-track" aria-hidden="true"></span></label></div><div class="metrics"><span>累计复用 <strong id="tab-reuse-count">—</strong> 次</span><span>最近一次：<span id="tab-reuse-last">尚无记录</span></span></div><div class="cleanup-row"><p id="tab-reuse-cleanup-summary" class="muted">正在扫描…</p><button id="tab-reuse-cleanup" class="secondary" type="button" disabled>一键整理</button></div><p class="muted">飞书和腾讯文档同一表格的不同工作表在原标签内切换。整理时置顶、正在播放声音及窗口唯一标签不会被关闭；需在6秒内再次点击确认。所有判断在本机完成，不读取网页正文。</p><p id="tab-reuse-feedback" class="feedback" role="status" aria-live="polite"></p></section>
-<section><h2>当前数据</h2><p id="data-status" role="status">正在检查…</p><p id="data-detail" class="muted"></p><div class="actions"><button id="refresh">立即刷新</button><button id="open" class="secondary">打开飞书表格 / 登录</button></div><p class="muted">每15分钟检查更新；读取失败时继续使用本机上次成功缓存。扩展不内置业务链接，首次使用请配置飞书地址并登录有权限的账号。</p></section>
-<section><h2>数据源</h2><label for="source-url">飞书多维表格或知识库地址</label><input id="source-url" type="url" placeholder="https://你的域名.feishu.cn/wiki/…"><div class="actions"><button id="save-source" class="secondary">保存地址并读取</button></div><p class="muted">优先读取“链接库_精简”，没有精简表时读取原“链接库”；请保留“游戏配置”表。精简表按游戏和专服合并，后台、礼包等分列，同格多条链接换行填写“名称 | 完整网址”。这里只读已登录账号有权访问的表格，无需填写密码或授权码。</p><p class="muted">当前每张数据表支持完整读取1000条；超过上限会提示并保留缓存。</p></section>
-<section id="source-compare"><h2>同步客服资料大全</h2><label for="sheet-url">客服资料大全地址</label><input id="sheet-url" type="url" placeholder="https://你的域名.feishu.cn/wiki/…?sheet=…"><div class="actions"><button id="compare">对比并列出新增</button><button id="sync" class="secondary">对比并同步到链接库</button></div><p class="muted">“对比并列出新增”只读：先刷新链接库，再读取客服资料大全，列出链接库还没有的游戏和链接；新增链接按“名称 | 网址”整理好，可复制粘贴到“链接库_精简”。默认对比“游戏后台”工作表。</p><p class="muted">“对比并同步到链接库”以客服资料大全为准，逐款游戏对齐链接库：列出每款游戏要新增、删除（原表已没有）的链接和专服变化，取消勾选不想改的游戏后点“确认写入”。已一致的行不动；在原行上修改，缺的行新增，重复或过时的行标为“待核对”（不删除）。原表改了游戏名称时，同步改链接库和游戏配置的名称。每项写入后读回核实，再刷新插件缓存。需要对链接库有编辑权限。</p><p id="compare-status" role="status" aria-live="polite"></p><div id="compare-result"></div><p id="sync-status" role="status" aria-live="polite"></p><div id="sync-result"></div></section>
-<section id="public-section" hidden><h2>公共链接</h2><div id="public-links"></div></section>
-<section id="legacy-section" hidden><h2>旧版未完成请求</h2><p class="muted">以下请求没有自动写入飞书，请在新表中补录。旧记录保留在本机。</p><div id="requests"></div></section>
-<section><h2>旧版备份</h2><p class="muted">如以前使用本地表格新增，可下载最后一次修改前的备份。新版不会继续写入本地表格。</p><button id="backup" class="secondary">下载旧版修改前备份</button></section>
+<body class="app manager">
+<header class="topbar">
+  <div class="brand"><span class="brand-mark" aria-hidden="true">链</span><div><strong>客服链接助手</strong><span id="runtime-version"></span></div></div>
+  <a class="update-chip" href="#update" id="extension-update-status">正在检查更新状态…</a>
+</header>
+<div class="shell">
+<nav class="tabs" role="tablist" aria-label="功能">
+  <button role="tab" id="tab-data" data-tab="data" aria-controls="panel-data">链接数据</button>
+  <button role="tab" id="tab-sync" data-tab="sync" aria-controls="panel-sync">同步资料大全</button>
+  <button role="tab" id="tab-reuse-tab" data-tab="reuse" aria-controls="panel-reuse">标签复用</button>
+  <button role="tab" id="tab-update" data-tab="update" aria-controls="panel-update">更新与备份</button>
+</nav>
+<main>
+<div class="panel" id="panel-data" role="tabpanel" aria-labelledby="tab-data">
+  <section>
+    <div class="section-head"><h2>当前数据</h2><div class="actions"><button id="refresh">立即刷新</button><button id="open" class="secondary">打开飞书表格 / 登录</button></div></div>
+    <p id="data-status" role="status">正在检查…</p>
+    <div id="data-stats" class="stats" hidden></div>
+    <p id="data-detail" class="muted"></p>
+    <p class="muted">每 15 分钟自动检查；读取失败时继续使用本机上次成功的缓存。</p>
+  </section>
+  <section>
+    <h2>数据源</h2>
+    <label for="source-url">飞书多维表格或知识库地址</label>
+    <div class="inline-field"><input id="source-url" type="url" placeholder="https://你的域名.feishu.cn/wiki/…"><button id="save-source" class="secondary">保存并读取</button></div>
+    <details class="help"><summary>填写说明</summary><p>优先读取“链接库_精简”，没有精简表时读取原“链接库”；请保留“游戏配置”表。精简表按游戏和专服合并，后台、礼包等分列，同格多条链接换行填写“名称 | 完整网址”。</p><p>只读取当前浏览器已登录账号有权访问的表格，无需填写密码或授权码。每张数据表支持完整读取 1000 条，超过上限会提示并保留缓存。</p></details>
+  </section>
+  <section id="public-section" hidden><h2>公共链接</h2><div id="public-links"></div></section>
+</div>
+<div class="panel" id="panel-sync" role="tabpanel" aria-labelledby="tab-sync" hidden>
+  <section id="source-compare">
+    <h2>同步客服资料大全</h2>
+    <label for="sheet-url">客服资料大全地址</label>
+    <input id="sheet-url" type="url" placeholder="https://你的域名.feishu.cn/wiki/…?sheet=…">
+    <div class="actions"><button id="compare" class="secondary">对比并列出新增（只读）</button><button id="sync">对比并同步到链接库</button></div>
+    <details class="help"><summary>两个按钮有什么区别</summary>
+      <p><strong>对比并列出新增</strong>：只读。刷新链接库后读取客服资料大全，列出链接库还没有的游戏和链接，按“名称 | 网址”整理好供复制粘贴。默认对比“游戏后台”工作表。</p>
+      <p><strong>对比并同步到链接库</strong>：以客服资料大全为准逐款游戏对齐链接库，列出每款游戏要新增、删除的链接和专服变化；取消勾选不想改的游戏后点“确认写入”。已一致的行不动，重复或过时的行标为“待核对”（不删除），原表改名时同步改链接库和游戏配置。每项写入后读回核实。需要对链接库有编辑权限。</p>
+    </details>
+    <p id="compare-status" role="status" aria-live="polite"></p><div id="compare-result"></div>
+    <p id="sync-status" role="status" aria-live="polite"></p><div id="sync-result"></div>
+  </section>
+</div>
+<div class="panel" id="panel-reuse" role="tabpanel" aria-labelledby="tab-reuse-tab" hidden>
+  <section id="tab-reuse"><div class="status-row"><div><h2>标签复用</h2><p id="tab-reuse-status" class="muted">正在读取状态…</p></div><label class="switch"><span class="sr-only">启用标签复用</span><input id="tab-reuse-enabled" type="checkbox" disabled><span class="switch-track" aria-hidden="true"></span></label></div><div class="metrics"><span>累计复用 <strong id="tab-reuse-count">—</strong> 次</span><span>最近一次：<span id="tab-reuse-last">尚无记录</span></span></div><div class="cleanup-row"><p id="tab-reuse-cleanup-summary" class="muted">正在扫描…</p><button id="tab-reuse-cleanup" class="secondary" type="button" disabled>一键整理</button></div><p id="tab-reuse-feedback" class="feedback" role="status" aria-live="polite"></p>
+  <details class="help"><summary>说明</summary><p>飞书和腾讯文档同一表格的不同工作表在原标签内切换。整理时置顶、正在播放声音及窗口唯一标签不会被关闭；需在 6 秒内再次点击确认。所有判断在本机完成，不读取网页正文。</p></details></section>
+</div>
+<div class="panel" id="panel-update" role="tabpanel" aria-labelledby="tab-update" hidden>
+  <section><div class="section-head"><h2>扩展程序更新</h2><a class="button" href="update.html">检查并更新</a></div><p id="extension-update-detail">正在检查更新状态…</p><p class="muted">有新版会在扩展图标和这里提示，点击后自动下载和安装，无需手动下载 ZIP。</p></section>
+  <section id="legacy-section" hidden><h2>旧版未完成请求</h2><p class="muted">以下请求没有自动写入飞书，请在新表中补录。旧记录保留在本机。</p><div id="requests"></div></section>
+  <section><div class="section-head"><h2>旧版备份</h2><button id="backup" class="secondary">下载旧版修改前备份</button></div><p class="muted">以前用本地表格新增链接时，可下载最后一次修改前的备份。新版不再写入本地表格。</p></section>
+</div>
 <p id="notice" role="status" aria-live="polite"></p>
-</main><script src="file-store.js"></script><script src="source-compare.js"></script><script src="manager.js"></script><script type="module" src="tab-reuse/panel.js"></script></body></html>
+</main>
+</div>
+<script src="file-store.js"></script><script src="source-compare.js"></script><script src="manager.js"></script><script type="module" src="tab-reuse/panel.js"></script></body></html>
