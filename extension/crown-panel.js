@@ -28,7 +28,7 @@
     input,select { font:inherit;font-weight:normal;height:22px;padding:0 5px;border:1px solid #c3cfe0;border-radius:4px;background:#fff;color:#1f2d42;min-width:0; }
     input[type=checkbox],input[type=radio] { height:auto;margin:0 3px 0 0;vertical-align:-2px; }
     input:focus,select:focus { outline:2px solid #9bb8ea;outline-offset:-1px; }
-    label { white-space:nowrap; } .row { display:flex;align-items:center;gap:4px 8px;margin:3px 0;flex-wrap:wrap; }
+    .row.actions { margin:0 0 6px; } label { white-space:nowrap; } .row { display:flex;align-items:center;gap:4px 8px;margin:3px 0;flex-wrap:wrap; }
     .k { color:#6b788c;white-space:nowrap; } .muted { color:#6b788c; } .sep { color:#c3cfe0; }
     .seg { display:inline-flex;height:22px;border:1px solid #c3cfe0;border-radius:4px;overflow:hidden; }
     .seg label { display:flex;align-items:center;padding:0 8px;cursor:pointer;border-left:1px solid #c3cfe0; } .seg label:first-child { border-left:0; }
@@ -281,12 +281,12 @@
     targetSelect.onchange = renderShared;
     renderShared();
 
-    const actions = el('div', 'row'), start = button('开始查询', null, 'primary'), status = el('div');
+    // 开始查询放在设置区外面，设置折叠后也能直接再次查询。
+    const actions = el('div', 'row actions'), start = button('开始查询', null, 'primary'), status = el('div');
     actions.append(start, el('span', 'muted', '查询期间请勿刷新页面，不改变当前查询条件'));
-    setup.append(actions);
     const progress = el('section', 'progress'); progress.hidden = true;
     const results = el('div');
-    main.append(setup, status, progress, results);
+    main.append(setup, actions, status, progress, results);
 
     start.onclick = async () => {
       // 核对共服区服和保存设置需要等待，点击后立即禁用，避免连点同时启动两轮扫描。
