@@ -3,7 +3,7 @@
   const $ = id => document.getElementById(id), api = WorkToolLocalUpdate, files = WorkToolFiles;
   const current = chrome.runtime.getManifest().version;
   const DIRECTORY = 'local-update-directory', BACKUP = 'local-update-backup';
-  let directory, prepared, backup, githubConfig, githubStatus, busy = true, packageSequence = 0;
+  let directory, prepared, backup, githubConfig, githubStatus, busy = true, checking = false, packageSequence = 0;
   $('current-version').textContent = current;
   const notice = text => { $('notice').textContent = text; };
   function progress(text, done, total) {
@@ -22,7 +22,7 @@
     $('github-check').disabled = busy || !githubConfig || backup?.state === 'pending';
     $('update-recovery').hidden = backup?.state !== 'pending';
     $('github-status').dataset.available = String(!!githubStatus?.available);
-    $('github-status').textContent = !githubConfig ? '尚未配置GitHub更新源' : githubStatus?.state === 'error' ? `检查失败：${githubStatus.error}` :
+    $('github-status').textContent = !githubConfig ? '尚未配置GitHub更新源' : checking ? '正在检查GitHub更新…' : githubStatus?.state === 'error' ? `检查失败：${githubStatus.error}` :
       githubStatus?.available ? `发现新版 ${githubStatus.version}，` + (busy ? '正在处理，请查看下方进度。' : backup?.state === 'pending' ? '请先修复上次更新，再继续安装。' : '点击“检查并更新”即可安装。') : githubStatus?.state === 'current' ? `当前已是最新版本（仓库版本 ${githubStatus.version}）。` : '尚未检查更新';
     $('restore-section').hidden = !backup || backup.state === 'restored';
     $('backup-status').textContent = backup ? `${backup.from} → ${backup.to}` + (backup.state === 'pending' ? ' · 上次更新中断，请先恢复' : ' · 已保留更新前文件') : '';
@@ -78,7 +78,9 @@
       // 目录授权在用户点击时完成，避免网络等待后丢失浏览器的用户手势。
       if (!directory) await chooseDirectory();
       await permission(); progress('正在检查GitHub更新…');
-      githubStatus = (await send({type:'updates:check'})).status;
+      // 页面打开时显示的是上次定时检查的结果；本次结果一到就刷新，不能在安装过程中继续显示旧的“已是最新”。
+      checking = true; display();
+      try { githubStatus = (await send({type:'updates:check'})).status; } finally { checking = false; display(); }
       if (githubStatus?.state === 'error') throw Error(githubStatus.error);
       if (!githubStatus?.available) { $('update-progress').hidden = true; notice('当前已是最新版本。'); return; }
       progress(`正在比较本地文件，准备下载 ${githubStatus.version}…`);
