@@ -6,14 +6,20 @@
   let directory, prepared, backup, githubConfig, githubStatus, busy = true, checking = false, packageSequence = 0;
   $('current-version').textContent = current;
   const notice = text => { $('notice').textContent = text; };
-  function progress(text, done, total) {
+  const seconds = ms => (ms / 1000).toFixed(ms < 10000 ? 1 : 0) + ' 秒';
+  function progress(text, done, total, detail) {
     const meter = $('update-progress'); meter.hidden = false;
     if (total) {
       const percent = Math.round(done / total * 100);
       meter.max = 100; meter.value = percent;
-      notice(`${text}：${done}/${total}（${percent}%），请保持本页打开…`);
+      // 写入时 Chrome 会对每个 .js/.html 做安全浏览检查，访问不到 Google 时每个文件要等约 7 秒，这里说明正在等什么。
+      const extra = detail ? ` · 已用 ${seconds(detail.elapsed)}` + (detail.active.length ? `\n正在写入：${detail.active.join('、')}（浏览器正在做安全检查，每个文件最多约 7 秒）` : '') : '';
+      notice(`${text}：${done}/${total}（${percent}%），请保持本页打开…${extra}`);
     } else { meter.removeAttribute('value'); notice(text); }
   }
+  // 上次更新各文件的写入耗时，用于排查安装慢的原因。
+  const timingText = timing => `上次更新写入 ${timing.files.length} 个文件，用时 ${seconds(timing.ms)}` +
+    (timing.files.length ? `；最慢：${timing.files.slice(0, 3).map(f => `${f.name} ${seconds(f.ms)}`).join('、')}` : '') + '。';
   function display() {
     $('directory-status').textContent = directory ? `已选择：${directory.name}` : '尚未选择';
     $('apply-update').disabled = busy || !directory || !prepared || backup?.state === 'pending';
@@ -65,9 +71,15 @@
   };
   async function install(next) {
     progress('正在比较并备份需要更新的文件…');
-    const result = await api.apply(directory, next, current, async value => { const saved = {...value, directory}; await files.state(BACKUP, saved); backup = saved; },
-      (done, total) => progress('正在安装',done,total));
-    notice(`已安装 ${result.version}（更新 ${result.files} 个文件），正在重新加载扩展。请刷新后台页面。`);
+    // 等待安全检查时没有新的进度事件，每秒刷新一次已用时间，避免看起来卡住。
+    let last = null;
+    const ticker = setInterval(() => { if (last) progress('正在安装', last.done, last.total, {...last.detail, elapsed: last.detail.elapsed + Date.now() - last.at}); }, 1000);
+    let result;
+    try {
+      result = await api.apply(directory, next, current, async value => { const saved = {...value, directory}; await files.state(BACKUP, saved); backup = saved; },
+        (done, total, detail) => { last = {done, total, detail, at: Date.now()}; progress('正在安装',done,total,detail); });
+    } finally { clearInterval(ticker); }
+    notice(`已安装 ${result.version}（更新 ${result.files} 个文件，用时 ${seconds(result.timing.ms)}），正在重新加载扩展。请刷新后台页面。`);
     chrome.runtime.reload();
   }
   $('github-check').onclick = async () => {
@@ -162,6 +174,7 @@
           }
         } catch (error) { notice(`上次更新需要修复：${error.message}。原备份已保留。`); }
       }
+      if (!$('notice').textContent && backup?.state === 'applied' && backup.to === current && backup.timing) notice(timingText(backup.timing));
       display();
     }
     catch (error) { notice(error.message); }
