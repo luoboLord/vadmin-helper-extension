@@ -10,26 +10,32 @@
   host.style.cssText = 'all:initial;position:fixed;right:20px;bottom:24px;z-index:2147483646;display:none;';
   const shadow = host.attachShadow({ mode: 'open' });
   const style = document.createElement('style');
+  // 紧凑布局：专服标签与链接同排、链接按钮不在中间折行、底部操作和状态合成一行，尽量少占屏幕。
   style.textContent = `
     :host { color-scheme:light; } * { box-sizing:border-box; }
-    .panel { width:min(360px,calc(100vw - 24px)); border:1px solid #dce3ef;border-radius:12px;
-      background:#f4f7fc;color:#233047;font:13px/1.5 "Microsoft YaHei",sans-serif;box-shadow:0 8px 32px #172b4d30;overflow:hidden; }
-    header { padding:10px 12px;background:white;cursor:move;touch-action:none;border-bottom:1px solid #e4eaf3; }
-    .top { display:flex;align-items:center;gap:8px; } strong { flex:1;font-size:15px;overflow-wrap:anywhere; }
-    button { font:inherit;border:0;border-radius:6px;background:#e9effa;color:#2859a9;padding:3px 8px;cursor:pointer; }
-    button:hover,a:hover { background:#dbe8ff; } .source { font-size:11px;color:#66758b;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
-    main { padding:8px;max-height:min(480px,calc(100vh - 140px));overflow:auto;overscroll-behavior:contain; }
-    section { background:white;border-radius:8px;padding:9px;margin-bottom:7px; } section:last-child { margin-bottom:0; }
-    h2 { font-size:13px;margin:0 0 7px; } .group { margin-top:7px; } .label { font-size:11px;color:#66758b;margin-bottom:3px; }
-    .links { display:flex;flex-wrap:wrap;gap:5px; } a { display:inline-block;text-decoration:none;color:#2454ad;background:#edf3ff;border-radius:5px;padding:3px 7px;overflow-wrap:anywhere; }
-    .note { font-size:12px;background:#fff5dd;color:#885900;padding:5px 7px;border-radius:5px;margin:5px 0;white-space:pre-wrap; }
-    .hint { color:#66758b;padding:8px; } .highlight { border-left:3px solid #e8ad32;padding-left:6px; }
-    footer { padding:10px;border-top:1px solid #dce3ef;background:white; } .actions { display:flex;gap:8px;flex-wrap:wrap; }
-    form label { display:block;margin:9px 0; } input:not([type=checkbox]),select { display:block;width:100%;padding:7px;border:1px solid #bac8dc;border-radius:5px;font:inherit;background:white;color:#233047; }
-    details { margin:10px 0; } summary { cursor:pointer;color:#2859a9; } .status { white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;margin:8px 0;color:#885900; }
+    .panel { width:min(380px,calc(100vw - 24px));max-height:calc(100vh - 32px);display:flex;flex-direction:column;border:1px solid #d5ddea;border-radius:10px;
+      background:#f3f6fb;color:#1f2d42;font:13px/1.45 "Microsoft YaHei","PingFang SC",sans-serif;box-shadow:0 10px 32px #0f1f3a2e;overflow:hidden; }
+    header { flex-shrink:0;padding:6px 8px 6px 12px;background:#fff;cursor:move;touch-action:none;user-select:none;border-bottom:1px solid #e3e9f2; }
+    .top { display:flex;align-items:baseline;gap:8px; } strong { font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:70%; }
+    .source { flex:1;min-width:0;font-size:11px;color:#6b788c;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+    button { font:inherit;font-size:12px;border:0;border-radius:5px;background:#e8eef9;color:#24539f;padding:2px 8px;cursor:pointer;white-space:nowrap; }
+    button:hover { background:#d9e5fb; } button.ghost { background:none;color:#5d6b82; } button.ghost:hover { background:#eef2f8;color:#1f2d42; }
+    main { padding:6px;min-height:48px;flex:1;max-height:min(600px,calc(100vh - 110px));overflow:auto;overscroll-behavior:contain; }
+    section { background:#fff;border:1px solid #e6ebf3;border-radius:7px;padding:6px 8px;margin-bottom:6px; } section:last-child { margin-bottom:0; }
+    h2 { font-size:12px;color:#4b5970;margin:0 0 4px; }
+    .group { padding:3px 0; } .group + .group { border-top:1px dashed #e6ebf3; }
+    .links { display:flex;flex-wrap:wrap;gap:4px;align-items:center; }
+    .tag { font-size:11px;color:#6b788c;background:#f0f3f8;border-radius:4px;padding:1px 6px;white-space:nowrap; }
+    .highlight .tag { color:#7d5300;background:#fff1cc;font-weight:bold; }
+    a { display:inline-block;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-decoration:none;color:#1f4f9e;background:#edf3ff;
+      border:1px solid #dbe6fb;border-radius:5px;padding:1px 7px;font-size:12.5px; } a:hover { background:#dbe8ff;border-color:#b9cff5; }
+    .highlight a { background:#fff8e6;border-color:#f2dca6;color:#6b4a00; } .highlight a:hover { background:#ffefc4; }
+    .note { font-size:12px;background:#fff6df;color:#7d5300;padding:3px 7px;border-radius:5px;margin:0 0 4px;white-space:pre-wrap;line-height:1.4; }
+    .hint { color:#6b788c;padding:6px; }
+    footer { flex-shrink:0;display:flex;align-items:center;gap:4px;padding:5px 8px;border-top:1px solid #e3e9f2;background:#fff; }
+    .status { flex:1;min-width:0;font-size:11px;color:#6b788c;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin:0 0 0 4px; }
+    .status.warn { color:#7d5300; } .status.msg { white-space:normal;color:#7d5300; }
     [hidden] { display:none!important; }
-    .panel { display:flex;flex-direction:column;max-height:calc(100vh - 32px); } header { flex-shrink:0; }
-    main { min-height:60px;flex:1; } footer { max-height:60vh;overflow:auto;flex-shrink:0; }
   `;
   function el(tag, className, text) {
     const node = document.createElement(tag);
@@ -42,14 +48,14 @@
   const header = el('header');
   const top = el('div', 'top');
   const title = el('strong');
-  const toggle = el('button', '', '收起');
+  const toggle = el('button', 'ghost', '收起');
   toggle.type = 'button';
   toggle.setAttribute('aria-expanded', 'true');
   const source = el('div', 'source');
   const main = el('main');
   const footer=el('footer');
-  top.append(title, toggle);
-  header.append(top, source);
+  top.append(title, source, toggle);
+  header.append(top);
   panel.append(header, main, footer);
   shadow.append(style, panel);
   document.documentElement.append(host);
@@ -113,7 +119,7 @@
         if (match.version && version.full !== match.version) continue;
         const filtered = core.filterServer(version, selection.label);
         if (!filtered.links.length && !filtered.notes.length) continue;
-        const card = el('section'); card.append(el('h2', '', version.version || version.full));
+        const card = el('section'); card.append(el('h2', '', version.version || version.full)); card.dataset.version = version.version || version.full;
         for (const [, note] of filtered.notes) card.append(el('div', 'note', note));
         for (const hint of filtered.loginHints) card.append(el('div', 'note', hint));
         const groups = [];
@@ -124,12 +130,16 @@
           groups[groups.length - 1].links.push(link);
         }
         for (const { server, links: groupLinks } of groups) {
-          const group = el('div', 'group' + (server !== '共用' ? ' highlight' : ''));
-          group.append(el('div', 'label', server), linkRow(groupLinks)); card.append(group);
+          // 专服名作为该行第一个小标签，和链接排在同一行，不单独占一行。
+          const group = el('div', 'group' + (server !== '共用' ? ' highlight' : '')), row = linkRow(groupLinks), tag = el('span', 'tag', server);
+          tag.title = server; row.prepend(tag); group.append(row); card.append(group);
         }
         main.append(card);
       }
-      if (!main.querySelector('section')) main.append(el('div', 'hint', '暂无适用于当前专服的链接。'));
+      const cards = main.querySelectorAll('section');
+      if (!cards.length) main.append(el('div', 'hint', '暂无适用于当前专服的链接。'));
+      // 只有一个版本时，版本名并入标题，省掉卡片标题这一行。
+      if (cards.length === 1) { title.textContent += ' · ' + cards[0].dataset.version; cards[0].querySelector('h2').remove(); }
     }
     renderAdd(selection);
     host.style.display = 'block'; clampPosition();
@@ -139,14 +149,17 @@
   async function send(message){if(!runtime?.id)throw Error('请先加载扩展并刷新后台页面');const result=await runtime.sendMessage(message);if(!result?.ok)throw Error(result?.error||'扩展连接已失效，请刷新后台页面');return result;}
   function renderAdd(){
     footer.replaceChildren();
-    const actions=el('div','actions'),add=el('button','','＋新增链接'),manage=el('button','','数据管理'),update=el('button','',updateStatus?.available?`有新版 ${updateStatus.version}`:'更新');
-    add.type=manage.type=update.type='button';actions.append(add,manage,update);footer.append(actions);
-    const status=el('p','status');status.setAttribute('role','status');footer.append(status);
+    const add=el('button','','＋新增链接'),manage=el('button','','数据管理'),update=el('button',updateStatus?.available?'':'ghost',updateStatus?.available?`有新版 ${updateStatus.version}`:'更新');
+    add.type=manage.type=update.type='button';
+    // 状态只显示一行短句，完整说明放在悬停提示；点击按钮后的操作提示完整显示。
+    const status=el('p','status');status.setAttribute('role','status');footer.append(add,manage,update,status);
     const state=feishuStatus?.state;
-    status.textContent=state==='ready'?'飞书已同步；新增或修改请直接编辑飞书表格。':state==='loading'?'正在读取飞书，暂用本机已有数据。':state==='error'?'飞书读取失败；有本机缓存时继续使用，请打开数据管理查看。':'请打开数据管理配置并读取飞书；扩展不内置业务链接。';
-    add.onclick=()=>send({type:'links:openSource'}).then(()=>{status.textContent='已打开飞书，请在“链接库”新增一行；保存后可在数据管理立即刷新。';}).catch(error=>{status.textContent=error.message;});
-    manage.onclick=()=>send({type:'links:manager'}).catch(error=>{status.textContent=error.message;});
-    update.onclick=()=>send({type:'updates:open'}).catch(error=>{status.textContent=error.message;});
+    const [short,full]=state==='ready'?['飞书已同步','飞书已同步；新增或修改请直接编辑飞书表格。']:state==='loading'?['正在读取飞书…','正在读取飞书，暂用本机已有数据。']:state==='error'?['飞书读取失败','飞书读取失败；有本机缓存时继续使用，请打开数据管理查看。']:['未读取飞书','请打开数据管理配置并读取飞书；扩展不内置业务链接。'];
+    status.textContent=short;status.title=full;if(state!=='ready')status.classList.add('warn');
+    const say=text=>{status.textContent=status.title=text;status.className='status msg';};
+    add.onclick=()=>send({type:'links:openSource'}).then(()=>say('已打开飞书，请在“链接库”新增一行；保存后可在数据管理立即刷新。')).catch(error=>say(error.message));
+    manage.onclick=()=>send({type:'links:manager'}).catch(error=>say(error.message));
+    update.onclick=()=>send({type:'updates:open'}).catch(error=>say(error.message));
   }
 
   let lastKey = '';
