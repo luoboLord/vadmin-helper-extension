@@ -94,7 +94,8 @@
     if (!response.ok) throw Error(response.status === 401 || response.status === 403 ? '登录已失效或无查询权限，请重新登录' : `查询失败：HTTP ${response.status}`);
     if (response.redirected || /text\/html/i.test(response.headers.get('content-type') || '')) throw Error('查询返回了网页，可能登录已失效，请重新登录');
     if (!Array.isArray(headers) || headers.length < 2) throw Error('无法取得当前流水类型的表头');
-    let rows = 0, bytes = 0, pending = [], size = 0, bufferedRows = 0, maxBufferedChars = 0;
+    let rows = 0, bytes = 0, pending = [], size = 0, bufferedRows = 0, maxBufferedChars = 0, mismatched = 0, firstMismatch = null;
+    const columns = headers.length - 1;
     const progress = () => onProgress({rows, bytes});
     const flush = async () => {
       if (!pending.length) return;
@@ -107,8 +108,15 @@
     for await (const record of records(response.body, {signal, yieldTask, onBytes: n => { bytes = n; progress(); }})) {
       checkAbort(signal);
       const details = record.detail.split('|');
-      if (details.length !== headers.length - 1) throw Error(`第 ${rows + bufferedRows + 1} 条日志列数与表头不一致，已停止导出`);
-      if (traceIndex >= 0) {
+      // The page renders such rows anyway; keep the raw text instead of failing the whole export.
+      // Extra separators are assumed to come from the trailing free-text field.
+      if (details.length !== columns) {
+        mismatched++;
+        firstMismatch ??= {row: rows + bufferedRows + 1, expected: columns, actual: details.length};
+        if (details.length > columns) details.splice(columns - 1, Infinity, details.slice(columns - 1).join('|'));
+        else while (details.length < columns) details.push('');
+      }
+      if (traceIndex >= 0 && details[traceIndex] !== '') {
         const id = details[traceIndex];
         details[traceIndex] = `${Object.hasOwn(traceNames, id) ? traceNames[id] : '未知'}[${id}]`;
       }
@@ -118,7 +126,7 @@
       if (size >= BATCH || bufferedRows >= 500) await flush();
     }
     await flush(); checkAbort(signal);
-    return {rows, bytes, maxBufferedChars};
+    return {rows, bytes, maxBufferedChars, mismatched, firstMismatch};
   }
   function validate(params) {
     for (const key of ['strBegin', 'strEnd']) {

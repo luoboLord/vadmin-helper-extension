@@ -68,7 +68,8 @@
         // Once closing begins the atomic file commit cannot be cancelled.
         cancel.disabled = true; notify('正在完成文件保存…');
         await writer.close(); committed = true;
-        notify(`导出完成：${result.rows.toLocaleString()} 条${result.rows ? '' : '（没有数据，仅保存表头）'}`);
+        const mismatch = result.firstMismatch ? `；其中 ${result.mismatched.toLocaleString()} 条列数与表头不一致，已按原文保留（首条：第 ${result.firstMismatch.row.toLocaleString()} 条，表头 ${result.firstMismatch.expected} 列，日志 ${result.firstMismatch.actual} 列）` : '';
+        notify(`导出完成：${result.rows.toLocaleString()} 条${result.rows ? '' : '（没有数据，仅保存表头）'}${mismatch}`);
       } catch (error) {
         controller.abort();
         if (error?.name === 'AbortError') notify('已取消导出');
