@@ -6,28 +6,58 @@
 
   const host = document.createElement('div');
   host.id = 'work-tool-crown';
-  host.style.cssText = 'all:initial;position:fixed;left:20px;top:60px;z-index:2147483646;display:none;';
+  host.style.cssText = 'all:initial;position:fixed;left:16px;top:56px;z-index:2147483647;display:none;';
   const shadow = host.attachShadow({ mode: 'open' });
   const style = document.createElement('style');
+  // 小窗口内尽量提高信息密度：默认 560 像素宽，可拖动标题栏移动、拖右下角改大小、收起成标题栏；
+  // 表格不折行，日期省略当年年份，开始查询后设置区折叠成一行摘要。
   style.textContent = `
     :host { color-scheme:light; } * { box-sizing:border-box; }
-    .panel { width:min(620px,calc(100vw - 40px));max-height:calc(100vh - 80px);display:flex;flex-direction:column;border:1px solid #dce3ef;border-radius:12px;
-      background:#f4f7fc;color:#233047;font:13px/1.5 "Microsoft YaHei",sans-serif;box-shadow:0 8px 32px #172b4d30;overflow:hidden; }
-    header { display:flex;align-items:center;gap:8px;padding:10px 12px;background:white;border-bottom:1px solid #e4eaf3; } strong { flex:1;font-size:15px; }
-    main { padding:10px;overflow:auto;overscroll-behavior:contain;flex:1; }
-    section { background:white;border-radius:8px;padding:10px;margin-bottom:8px; } h2 { font-size:13px;margin:0 0 8px; }
-    button { font:inherit;border:0;border-radius:6px;background:#e9effa;color:#2859a9;padding:4px 10px;cursor:pointer; } button:hover { background:#dbe8ff; }
-    button.primary { background:#2859a9;color:white; } button:disabled { opacity:.5;cursor:default; }
-    input,select { font:inherit;padding:5px 7px;border:1px solid #bac8dc;border-radius:5px;background:white;color:#233047; }
-    label { margin-right:10px;white-space:nowrap; } .row { display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:6px 0; }
-    .muted { color:#66758b;font-size:12px; } .warn { background:#fff5dd;color:#885900;padding:6px 8px;border-radius:5px;margin:6px 0;white-space:pre-wrap; }
-    .bad { background:#ffe9e7;color:#a12b1f;padding:6px 8px;border-radius:5px;margin:6px 0;white-space:pre-wrap; }
-    .ok { background:#e7f6ec;color:#1d6b38;padding:6px 8px;border-radius:5px;margin:6px 0; }
-    .winner { border-left:3px solid #e8ad32;padding-left:8px;margin:8px 0; } .big { font-size:15px;font-weight:bold; }
-    table { border-collapse:collapse;width:100%;font-size:12px;margin-top:6px; } th,td { border:1px solid #e4eaf3;padding:3px 5px;text-align:left;overflow-wrap:anywhere; }
-    th { background:#f4f7fc; } td.num { text-align:right; } details { margin-top:6px; } summary { cursor:pointer;color:#2859a9; }
-    .matches { max-height:160px;overflow:auto;border:1px solid #e4eaf3;border-radius:5px;margin-top:4px; } .matches div { padding:3px 6px;display:flex;gap:6px;align-items:center; }
-    .reach-time { font-weight:bold; }
+    .panel { width:min(560px,calc(100vw - 32px));min-width:min(380px,calc(100vw - 16px));max-height:calc(100vh - 16px);
+      display:flex;flex-direction:column;resize:both;overflow:hidden;border:1px solid #d3dbe8;border-radius:8px;
+      background:#f4f6fa;color:#1f2d42;font:12px/1.5 "Microsoft YaHei","PingFang SC",sans-serif;box-shadow:0 8px 28px #0f1f3a2e; }
+    .panel.collapsed { resize:none;height:auto!important;min-height:0; } .panel.collapsed main { display:none; }
+    header { display:flex;align-items:center;gap:8px;padding:5px 6px 5px 10px;background:#fff;border-bottom:1px solid #e3e9f2;cursor:move;touch-action:none;user-select:none; }
+    .title { font-size:13px;font-weight:bold;white-space:nowrap; } .sub { flex:1;min-width:0;color:#6b788c;white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
+    main { padding:6px;overflow:auto;overscroll-behavior:contain;flex:1; }
+    section,details.setup { background:#fff;border:1px solid #e6ebf3;border-radius:6px;padding:5px 8px;margin-bottom:6px; }
+    h2 { display:flex;align-items:baseline;gap:6px;flex-wrap:wrap;font-size:12px;margin:0 0 3px;color:#1f2d42; } h2 > * { font-weight:normal; }
+    button { font:inherit;border:0;border-radius:4px;background:#e8eef9;color:#24539f;padding:1px 8px;cursor:pointer;white-space:nowrap; } button:hover { background:#d9e5fb; }
+    button.primary { background:#2859a9;color:#fff;padding:2px 14px; } button.primary:hover { background:#204a8f; } button:disabled { opacity:.5;cursor:default; }
+    button.ghost { background:none;color:#5d6b82;padding:1px 6px; } button.ghost:hover { background:#eef2f8;color:#1f2d42; }
+    input,select { font:inherit;font-weight:normal;height:22px;padding:0 5px;border:1px solid #c3cfe0;border-radius:4px;background:#fff;color:#1f2d42;min-width:0; }
+    input[type=checkbox],input[type=radio] { height:auto;margin:0 3px 0 0;vertical-align:-2px; }
+    input:focus,select:focus { outline:2px solid #9bb8ea;outline-offset:-1px; }
+    .row.actions { margin:0 0 6px; } label { white-space:nowrap; } .row { display:flex;align-items:center;gap:4px 8px;margin:3px 0;flex-wrap:wrap; }
+    .k { color:#6b788c;white-space:nowrap; } .muted { color:#6b788c; } .sep { color:#c3cfe0; }
+    .seg { display:inline-flex;height:22px;border:1px solid #c3cfe0;border-radius:4px;overflow:hidden; }
+    .seg label { display:flex;align-items:center;padding:0 8px;cursor:pointer;border-left:1px solid #c3cfe0; } .seg label:first-child { border-left:0; }
+    .seg input { position:absolute;opacity:0;pointer-events:none; } .seg label:has(input:checked) { background:#2859a9;color:#fff; }
+    .seg label:has(input:focus-visible) { outline:2px solid #9bb8ea;outline-offset:-2px; }
+    details.setup > summary { display:flex;align-items:center;gap:6px;cursor:pointer;list-style:none;font-weight:bold;white-space:nowrap; }
+    details.setup > summary::-webkit-details-marker { display:none; } details.setup > summary::before { content:'▸';color:#6b788c;font-weight:normal; }
+    details.setup[open] > summary::before { content:'▾'; } details.setup[open] > summary .brief { display:none; }
+    .brief { min-width:0;overflow:hidden;text-overflow:ellipsis;font-weight:normal;color:#4b5970; }
+    .search { flex:1;min-width:120px; }
+    .shared-row { display:flex;align-items:center;gap:6px;padding:1px 0 1px 12px; }
+    .shared-row .name { flex:1;min-width:40px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis; } .shared-row input[type=text] { width:80px; }
+    .hint { white-space:nowrap;max-width:110px;overflow:hidden;text-overflow:ellipsis; } .hint.good { color:#1d6b38; } .hint.badtext { color:#a12b1f; }
+    .matches { max-height:140px;overflow:auto;border:1px solid #e3e9f2;border-radius:4px;margin:2px 0; }
+    .matches div { padding:1px 6px;display:flex;gap:6px;align-items:center;white-space:nowrap;overflow:hidden; } .matches div:hover { background:#f4f6fa; }
+    .warn,.bad,.ok { padding:3px 7px;border-radius:4px;margin:3px 0;white-space:pre-wrap; }
+    .warn { background:#fff6df;color:#7d5300; } .bad { background:#ffebe8;color:#a12b1f; } .ok { background:#e6f5eb;color:#1d6b38; }
+    .pill { padding:0 6px;border-radius:8px;background:#e6f5eb;color:#1d6b38; } .pill.no { background:#ffebe8;color:#a12b1f; }
+    .progress { display:flex;align-items:center;gap:8px; } .progress .line { flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
+    .line1 { white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
+    .winner { border-left:3px solid #e8ad32;padding:0 0 0 8px;margin:3px 0; } .winner + .winner { margin-top:6px; }
+    .big { font-size:14px;font-weight:bold; } .big .id { font-size:12px;font-weight:normal;color:#4b5970;margin-left:6px; }
+    .meta { display:flex;flex-wrap:wrap;gap:0 12px; } .meta > span { white-space:nowrap; }
+    .reach-time { font-weight:bold;color:#1f2d42; }
+    .tw { overflow:auto;max-height:300px;border:1px solid #e9eef5;border-radius:4px;margin-top:3px; }
+    table { border-collapse:collapse;width:100%; } th,td { padding:1px 6px;text-align:left;white-space:nowrap;border-bottom:1px solid #eef2f7; }
+    th { position:sticky;top:0;background:#f4f6fa;color:#5d6b82;font-weight:normal;z-index:1; } tr:last-child td { border-bottom:0; } tbody tr:hover td { background:#f7f9fc; }
+    td.num,th.num { text-align:right;font-variant-numeric:tabular-nums; } td.wrap { white-space:normal;min-width:9em; } .cut { display:inline-block;max-width:7em;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom; }
+    details.more > summary { cursor:pointer;color:#24539f; }
     [hidden] { display:none!important; }
   `;
   const el = (tag, className, textValue) => {
@@ -37,36 +67,75 @@
     return node;
   };
   const button = (label, onclick, className = '') => { const b = el('button', className, label); b.type = 'button'; b.onclick = onclick; return b; };
-  const panel = el('aside', 'panel'), header = el('header'), title = el('strong', '', '查冠名权'), main = el('main');
+  const panel = el('aside', 'panel'), header = el('header'), title = el('span', 'title', '查冠名权'), sub = el('span', 'sub'), main = el('main');
   panel.setAttribute('aria-label', '查冠名权');
-  // 关闭只隐藏面板；查询进行中再次打开可继续查看进度。
-  header.append(title, button('关闭', () => { host.style.display = 'none'; }));
+  // 收起只留标题栏，方便查看下面的后台信息；关闭只隐藏面板，查询进行中再次打开可继续查看进度。
+  const fold = button('收起', () => { const on = panel.classList.toggle('collapsed'); fold.textContent = on ? '展开' : '收起'; clampPosition(); }, 'ghost');
+  header.append(title, sub, fold, button('关闭', () => { host.style.display = 'none'; }, 'ghost'));
   panel.append(header, main); shadow.append(style, panel); document.documentElement.append(host);
+
+  // 位置和大小记在本页（后台域名）的 localStorage，下次打开沿用；读写失败时用默认值。
+  const LAYOUT_KEY = 'workToolCrownLayout';
+  function clampPosition() {
+    if (host.style.display === 'none') return;
+    const left = Math.max(8, Math.min(parseFloat(host.style.left) || 16, innerWidth - Math.min(host.offsetWidth, innerWidth - 16) - 8));
+    const top = Math.max(8, Math.min(parseFloat(host.style.top) || 56, innerHeight - 120));
+    host.style.left = left + 'px'; host.style.top = top + 'px';
+    panel.style.maxHeight = (innerHeight - top - 8) + 'px';
+    panel.style.maxWidth = (innerWidth - left - 8) + 'px';
+  }
+  function saveLayout() {
+    try { localStorage.setItem(LAYOUT_KEY, JSON.stringify({ left: host.style.left, top: host.style.top, width: panel.style.width, height: panel.style.height })); } catch {}
+  }
+  try {
+    const saved = JSON.parse(localStorage.getItem(LAYOUT_KEY) || 'null');
+    if (saved) { host.style.left = saved.left; host.style.top = saved.top; if (saved.width) panel.style.width = saved.width; if (saved.height) panel.style.height = saved.height; }
+  } catch {}
+  let drag = null;
+  header.addEventListener('pointerdown', event => {
+    if (event.button !== 0 || event.target.closest('button')) return;
+    const rect = host.getBoundingClientRect();
+    drag = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    header.setPointerCapture(event.pointerId); event.preventDefault();
+  });
+  header.addEventListener('pointermove', event => {
+    if (!drag) return;
+    host.style.left = (event.clientX - drag.x) + 'px'; host.style.top = (event.clientY - drag.y) + 'px'; clampPosition();
+  });
+  const endDrag = () => { if (drag) { drag = null; saveLayout(); } };
+  header.addEventListener('pointerup', endDrag); header.addEventListener('lostpointercapture', endDrag);
+  window.addEventListener('resize', clampPosition);
+  // 拖右下角改大小后浏览器写入 width/height 内联样式，停下后保存。
+  let resizeTimer;
+  new ResizeObserver(() => { if (!panel.style.width && !panel.style.height) return; clearTimeout(resizeTimer); resizeTimer = setTimeout(saveLayout, 300); }).observe(panel);
 
   const gameName = gid => {
     const option = [...(document.querySelector('select#form_gid')?.options || [])].find(o => o.value === String(gid));
     return option ? option.textContent.trim() : String(gid);
   };
   const yuan = cents => calc.yuan(cents) + ' 元';
-  function table(headers, rows) {
-    const t = el('table'), head = el('tr');
-    for (const h of headers) head.append(el('th', '', h));
-    t.append(head);
+  // 表格默认不折行，放在可横向滚动的框里；num 列右对齐，wrap 列允许折行（说明类长文字）。
+  function table(headers, rows, { num = [], wrap = [], tips = {} } = {}) {
+    const box = el('div', 'tw'), t = el('table'), head = el('tr'), body = el('tbody');
+    headers.forEach((h, i) => { const th = el('th', num.includes(i) ? 'num' : '', h); if (tips[h]) th.title = tips[h]; head.append(th); });
+    const thead = el('thead'); thead.append(head); t.append(thead, body);
     for (const row of rows) {
       const tr = el('tr');
-      for (const cell of row) {
-        if (cell instanceof Node) { const td = el('td'); td.append(cell); tr.append(td); }
-        else tr.append(el('td', typeof cell === 'number' ? 'num' : '', String(cell)));
-      }
-      t.append(tr);
+      row.forEach((cell, i) => {
+        const td = el('td', num.includes(i) ? 'num' : wrap.includes(i) ? 'wrap' : '');
+        if (cell instanceof Node) td.append(cell); else td.textContent = String(cell);
+        tr.append(td);
+      });
+      body.append(tr);
     }
-    return t;
+    box.append(t);
+    return box;
   }
-  function reachLine(w) {
-    const line = el('div');
-    line.append('首次达标：', el('span', 'reach-time', `${w.date} ${w.time.slice(11)}`), ` · 达标时累计 ${yuan(w.reachedCents)} · 当天总额 ${yuan(w.dayTotalCents)}`);
-    return line;
-  }
+  const kv = (key, value) => { const span = el('span'); span.append(el('span', 'k', key + ' '), value instanceof Node ? value : String(value)); return span; };
+  // 日期时间在当年时省略年份，表格列更窄；跨年的仍显示完整日期。
+  const thisYear = String(new Date().getFullYear());
+  const short = value => { const text = String(value ?? ''); return text.startsWith(thisYear + '-') ? text.slice(5) : text; };
+  const cut = text => { const span = el('span', 'cut', text); span.title = text; return span; };
 
   // 从当前已查询的结果读取游戏和区服：游戏取筛选框；区服取结果表的区服列及筛选框。
   // 订单页“游戏区服ID”列是区服名称，玩家信息页“区服ID”列是“区服ID-名称”。只在点击按钮时读一次表格。
@@ -126,68 +195,73 @@
   const serversOf = gid => { if (!serverCache.has(gid)) serverCache.set(gid, api.servers(gid).catch(error => { serverCache.delete(gid); throw error; })); return serverCache.get(gid); };
 
   async function open() {
-    host.style.display = 'block';
+    host.style.display = 'block'; clampPosition();
     if (task) return;
     main.replaceChildren(el('div', 'muted', '正在读取当前查询结果…'));
     let info;
     try { info = await readTargets(); } catch (error) { info = { error: error.message }; }
     main.replaceChildren();
-    if (info.error) { main.append(el('div', 'warn', info.error)); return; }
+    if (info.error) { sub.textContent = ''; main.append(el('div', 'warn', info.error)); return; }
+    sub.textContent = sub.title = gameName(info.gid);
     serverCache.set(info.gid, Promise.resolve(info.servers));
     const saved = await loadConfig(info.gid);
     const config = { games: (saved?.games || []).map(g => ({ ...g, map: { ...(g.map || {}) } })) };
 
-    const setup = el('section');
-    setup.append(el('h2', '', '查询设置'));
-    const targetRow = el('div', 'row'), targetSelect = el('select');
+    // 设置区：第一行区服和门槛，第二行完整扫描和共服搜索；开始查询后折叠成一行摘要。
+    const setup = el('details', 'setup'), setupHead = el('summary'), brief = el('span', 'brief');
+    setup.open = true; setupHead.append('查询设置', brief); setup.append(setupHead);
+    const targetSelect = el('select');
     targetSelect.setAttribute('aria-label', '目标区服');
     for (const t of info.targets) targetSelect.append(new Option(`${t.name}（${t.psid}）`, t.psid));
-    targetRow.append(el('span', '', '目标：' + gameName(info.gid) + ' · 区服'), targetSelect);
-    if (info.unknown.length) setup.append(el('div', 'warn', `未能识别的区服：${info.unknown.join('、')}`));
 
-    const thresholdRow = el('div', 'row'), custom = el('input');
-    custom.type = 'text'; custom.inputMode = 'decimal'; custom.placeholder = '自定义金额'; custom.size = 10; custom.setAttribute('aria-label', '自定义门槛金额');
-    thresholdRow.append(el('span', '', '真实扣款门槛：'));
+    const seg = el('div', 'seg'), custom = el('input');
+    custom.type = 'text'; custom.inputMode = 'decimal'; custom.placeholder = '自定义'; custom.size = 6; custom.setAttribute('aria-label', '自定义门槛金额');
+    seg.setAttribute('role', 'radiogroup'); seg.setAttribute('aria-label', '真实扣款门槛');
     let thresholdValue = '500';
     for (const value of ['500', '2000', '5000']) {
       const label = el('label'), radio = el('input');
       radio.type = 'radio'; radio.name = 'crown-threshold'; radio.value = value; radio.checked = value === '500';
       radio.onchange = () => { thresholdValue = value; custom.value = ''; };
-      label.append(radio, document.createTextNode(' ' + value + ' 元')); thresholdRow.append(label);
+      label.append(radio, document.createTextNode(value)); seg.append(label);
     }
-    custom.oninput = () => { for (const r of thresholdRow.querySelectorAll('input[type=radio]')) r.checked = false; thresholdValue = custom.value.trim(); };
-    thresholdRow.append(custom, el('span', 'muted', '元'));
+    custom.oninput = () => { for (const r of seg.querySelectorAll('input[type=radio]')) r.checked = false; thresholdValue = custom.value.trim(); };
+    const firstRow = el('div', 'row');
+    firstRow.append(el('span', 'k', '区服'), targetSelect, el('span', 'k', '真实扣款门槛'), seg, custom, el('span', 'muted', '元'));
 
-    const scanRow = el('div', 'row'), full = el('input'), fullLabel = el('label');
-    full.type = 'checkbox'; fullLabel.append(full, document.createTextNode(' 完整扫描（不按累充金额排除角色，列出全部达标排名，较慢）'));
-    scanRow.append(fullLabel);
-    setup.append(targetRow, thresholdRow, scanRow);
+    const full = el('input'), fullLabel = el('label');
+    full.type = 'checkbox'; fullLabel.append(full, document.createTextNode('完整扫描'));
+    fullLabel.title = '不按累充金额排除角色，列出全部达标排名，较慢';
 
     // 共服：选择需要一起统计的游戏ID，并为目标区服填写对应区服ID（编号一致时可勾选共用编号）。
-    const shared = el('section');
-    const sharedList = el('div'), searchBox = el('input'), matches = el('div', 'matches');
-    searchBox.placeholder = '搜索游戏ID或名称，添加共服游戏'; searchBox.style.width = '100%'; searchBox.setAttribute('aria-label', '搜索共服游戏');
+    const sharedList = el('div'), searchBox = el('input', 'search'), matches = el('div', 'matches');
+    searchBox.placeholder = saved ? '共服：搜索游戏ID或名称添加' : '共服：搜索添加（没有共服可不填）';
+    searchBox.title = saved ? '已带出上次保存的共服设置，可修改。' : '首次查询该游戏：如有共服游戏请添加；没有则直接开始查询，设置会被保存。';
+    searchBox.setAttribute('aria-label', '搜索共服游戏');
     matches.hidden = true;
-    shared.append(el('h2', '', '共服范围'), el('div', 'muted', saved ? '已带出上次保存的共服设置，可修改。' : '首次查询该游戏：如有共服游戏请添加；没有则直接开始查询，设置会被保存。'), sharedList, searchBox, matches);
+    const secondRow = el('div', 'row');
+    secondRow.append(fullLabel, el('span', 'sep', '|'), searchBox);
+    setup.append(firstRow, secondRow, matches, sharedList);
+    if (info.unknown.length) setup.append(el('div', 'warn', `未能识别的区服：${info.unknown.join('、')}`));
     function renderShared() {
       sharedList.replaceChildren();
-      if (!config.games.length) sharedList.append(el('div', 'muted', '仅统计当前游戏。'));
       for (const game of config.games) {
-        const row = el('div', 'row'), input = el('input'), same = el('input'), sameLabel = el('label'), hint = el('span', 'muted');
-        input.size = 14; input.placeholder = '对应区服ID'; input.setAttribute('aria-label', `${game.gid} 对应区服ID`);
-        same.type = 'checkbox'; same.checked = !!game.sameIds; sameLabel.append(same, document.createTextNode(' 编号一致'));
+        const row = el('div', 'shared-row'), input = el('input'), same = el('input'), sameLabel = el('label'), hint = el('span', 'hint');
+        input.type = 'text'; input.placeholder = '对应区服ID'; input.setAttribute('aria-label', `${game.gid} 对应区服ID`);
+        same.type = 'checkbox'; same.checked = !!game.sameIds; sameLabel.append(same, document.createTextNode('编号一致'));
         const psid = targetSelect.value;
         input.value = game.sameIds ? psid : (game.map[psid] || '');
         input.disabled = same.checked;
         const check = async () => {
           const value = same.checked ? targetSelect.value : input.value.trim();
           if (!same.checked) { if (value) game.map[targetSelect.value] = value; else delete game.map[targetSelect.value]; }
-          if (!value) { hint.textContent = '请填写对应区服ID'; return; }
-          try { const hit = (await serversOf(game.gid)).find(s => s.psid === value); hint.textContent = hit ? '✓ ' + hit.name : '该游戏没有这个区服ID'; }
-          catch (error) { hint.textContent = error.message; }
+          const show = (text, ok) => { hint.textContent = hint.title = text; hint.className = 'hint ' + (ok ? 'good' : 'badtext'); };
+          if (!value) { show('请填写对应区服ID', false); return; }
+          try { const hit = (await serversOf(game.gid)).find(s => s.psid === value); show(hit ? '✓ ' + hit.name : '该游戏没有这个区服ID', !!hit); }
+          catch (error) { show(error.message, false); }
         };
         input.onchange = check; same.onchange = () => { game.sameIds = same.checked; renderShared(); };
-        row.append(el('span', '', gameName(game.gid)), input, sameLabel, button('移除', () => { config.games = config.games.filter(g => g !== game); renderShared(); }), hint);
+        const name = el('span', 'name', '共服 · ' + gameName(game.gid)); name.title = gameName(game.gid);
+        row.append(name, input, sameLabel, hint, button('移除', () => { config.games = config.games.filter(g => g !== game); renderShared(); }, 'ghost'));
         sharedList.append(row); check();
       }
     }
@@ -199,19 +273,20 @@
         .filter(o => +o.value > 0 && o.value !== info.gid && !config.games.some(g => g.gid === o.value) && o.textContent.includes(query)).slice(0, 30);
       if (!hits.length) matches.append(el('div', 'muted', '没有匹配的游戏'));
       for (const o of hits) {
-        const row = el('div');
-        row.append(button('添加', () => { config.games.push({ gid: o.value, sameIds: false, map: {} }); searchBox.value = ''; matches.hidden = true; renderShared(); }), el('span', '', o.textContent.trim()));
+        const row = el('div'), name = el('span', '', o.textContent.trim()); name.title = name.textContent;
+        row.append(button('添加', () => { config.games.push({ gid: o.value, sameIds: false, map: {} }); searchBox.value = ''; matches.hidden = true; renderShared(); }), name);
         matches.append(row);
       }
     };
     targetSelect.onchange = renderShared;
     renderShared();
 
-    const actions = el('div', 'row'), start = button('开始查询', null, 'primary'), status = el('div');
-    actions.append(start, el('span', 'muted', '查询期间请不要刷新页面；不会改变订单页当前的查询条件。'));
-    const progress = el('section'); progress.hidden = true;
+    // 开始查询放在设置区外面，设置折叠后也能直接再次查询。
+    const actions = el('div', 'row actions'), start = button('开始查询', null, 'primary'), status = el('div');
+    actions.append(start, el('span', 'muted', '查询期间请勿刷新页面，不改变当前查询条件'));
+    const progress = el('section', 'progress'); progress.hidden = true;
     const results = el('div');
-    main.append(setup, shared, actions, status, progress, results);
+    main.append(setup, actions, status, progress, results);
 
     start.onclick = async () => {
       // 核对共服区服和保存设置需要等待，点击后立即禁用，避免连点同时启动两轮扫描。
@@ -232,7 +307,9 @@
         }
         await saveConfig(info.gid, config);
         launched = true;
-        run({ scope, thresholdCents, fullScan: full.checked, start, progress, results, setup, shared, done: renderShared });
+        brief.textContent = brief.title = `${base.name}（${base.psid}） · 门槛 ${yuan(thresholdCents)}` + (config.games.length ? ` · 共服 ${config.games.length} 款` : '') + (full.checked ? ' · 完整扫描' : '');
+        setup.open = false;
+        run({ scope, thresholdCents, fullScan: full.checked, start, progress, results, setup, done: renderShared });
       } catch (error) {
         status.append(el('div', 'bad', '无法开始查询：' + error.message));
       } finally {
@@ -241,13 +318,13 @@
     };
   }
 
-  async function run({ scope, thresholdCents, fullScan, start, progress, results, setup, shared, done }) {
+  async function run({ scope, thresholdCents, fullScan, start, progress, results, setup, done }) {
     const controller = new AbortController();
     task = controller;
-    const lock = pending => { for (const node of [...setup.querySelectorAll('input,select,button'), ...shared.querySelectorAll('input,select,button')]) node.disabled = pending; start.disabled = pending; };
+    const lock = pending => { for (const node of setup.querySelectorAll('input,select,button')) node.disabled = pending; start.disabled = pending; };
     lock(true);
-    const line = el('div'), cancel = button('取消', () => controller.abort(Error('已取消')));
-    progress.replaceChildren(el('h2', '', '查询进度'), line, cancel); progress.hidden = false;
+    const line = el('span', 'line', '准备中…'), cancel = button('取消', () => controller.abort(Error('已取消')));
+    progress.replaceChildren(el('strong', '', '查询中'), line, cancel); progress.hidden = false;
     const startedAt = new Date();
     const players = [], issues = [];
     let result = null, fatal = null;
@@ -274,10 +351,17 @@
     results.replaceChildren();
     const allIssues = [...issues, ...(result?.issues || [])];
     const complete = !fatal && result && allIssues.length === 0;
-    const summary = el('section');
-    summary.append(el('h2', '', `结果 · 门槛 ${yuan(thresholdCents)}`));
-    if (complete) summary.append(el('div', 'ok', '查询完整。'));
-    else summary.append(el('div', 'bad', '查询不完整，不能作为冠名权结论。' + (fatal ? '\n' + fatal : '') +
+    // 只查一个区服时省掉“区服ID”列；共服时才列出。
+    const multi = scope.length > 1;
+    const summary = el('section'), heading = el('h2', '', `结果 · 门槛 ${yuan(thresholdCents)}`);
+    const readAt = startedAt.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
+    heading.append(el('span', complete ? 'pill' : 'pill no', complete ? '查询完整' : '查询不完整'),
+      el('span', 'muted', result ? `核查 ${result.checked} 名 · 累充不足排除 ${result.skippedByTotal} 名` : ''));
+    // 覆盖范围和读取时间压成一行，完整内容在悬停提示。
+    const coverage = el('div', 'muted line1', `${readAt} · ` + scope.map(s => `${gameName(s.gid)} · ${s.name}（${s.psid}）`).join('；'));
+    coverage.title = `读取时间 ${readAt}\n覆盖范围：\n` + scope.map(s => `${gameName(s.gid)} · ${s.name}（${s.psid}）`).join('\n');
+    summary.append(heading, coverage);
+    if (!complete) summary.append(el('div', 'bad', '查询不完整，不能作为冠名权结论。' + (fatal ? '\n' + fatal : '') +
       allIssues.slice(0, 20).map(i => `\n· ${i.role?.roleName || i.role?.roleId || ''} ${i.reason}`).join('') + (allIssues.length > 20 ? `\n…共 ${allIssues.length} 条` : '')));
     const queryDetails = [];
     for (const w of result?.warnings || []) {
@@ -285,8 +369,8 @@
       else summary.append(el('div', 'warn', w.reason));
     }
     if (queryDetails.length) {
-      const details = el('details');
-      details.append(el('summary', '', `查询说明（${queryDetails.length} 条，点击展开）`));
+      const details = el('details', 'more');
+      details.append(el('summary', '', `查询说明（${queryDetails.length} 条）`));
       for (const w of queryDetails) details.append(el('div', 'warn', w.reason));
       summary.append(details);
     }
@@ -299,55 +383,56 @@
       for (const w of result.winners) {
         const box = el('div', 'winner'), server = scope.find(s => s.gid === w.gameId && s.psid === w.serverId);
         // 达标订单默认折叠，需要核对时再展开。
-        const orders = el('details'), orderCents = w.orders.reduce((total, o) => total + o.amountCents, 0);
-        orders.append(el('summary', '', `订单明细（${w.orders.length} 笔，合计 ${yuan(orderCents)}，点击展开）`),
-          table(['订单号', '创建时间', '真实扣款'], w.orders.map(o => [o.orderId, o.createdAt, calc.yuan(o.amountCents)])));
-        box.append(el('div', 'big', `${w.roleName || '(无角色名)'} · ${w.roleId}`),
-          el('div', '', `${gameName(w.gameId)} · ${server?.name || ''}（区服ID ${w.serverId}）`),
-          // 活动常限定达标后几天内申请，达标时间加粗便于核对是否过期。
-          reachLine(w), orders);
+        const orders = el('details', 'more'), orderCents = w.orders.reduce((total, o) => total + o.amountCents, 0);
+        orders.append(el('summary', '', `订单明细 ${w.orders.length} 笔 · 合计 ${yuan(orderCents)}`),
+          table(['订单号', '创建时间', '真实扣款'], w.orders.map(o => [o.orderId, o.createdAt, calc.yuan(o.amountCents)]), { num: [2] }));
+        const nameLine = el('div', 'big'), roleName = el('span', '', w.roleName || '(无角色名)');
+        nameLine.append(roleName, el('span', 'id', w.roleId), el('span', 'id', `${server?.name || ''}（${w.serverId}）`));
+        if (w.gameId !== scope[0].gid) nameLine.append(el('span', 'id', gameName(w.gameId)));
+        const meta = el('div', 'meta');
+        // 活动常限定达标后几天内申请，达标时间加粗、保留完整日期，便于核对是否过期。
+        meta.append(kv('首次达标', el('span', 'reach-time', `${w.date} ${w.time.slice(11)}`)), kv('达标时累计', yuan(w.reachedCents)), kv('当天总额', yuan(w.dayTotalCents)));
+        box.append(nameLine, meta, orders);
         if (globalThis.WorkToolRoleCopy && w.roleName && server?.name) {
-          const name = el('span','',w.roleName);
-          globalThis.WorkToolRoleCopy.bindName(name,() => ({roleId: w.roleId, roleName: w.roleName, serverName: server.name}));
-          box.firstChild.replaceChildren(name,document.createTextNode(` · ${w.roleId}`));
+          globalThis.WorkToolRoleCopy.bindName(roleName,() => ({roleId: w.roleId, roleName: w.roleName, serverName: server.name}));
         }
         best.append(box);
       }
       results.append(best);
       const others = result.ranking.filter(r => r.place > 1);
-      const rank = el('section');
-      rank.append(el('h2', '', '其他达标角色'));
-      if (result.stoppedEarly) rank.append(el('div', 'muted', '已提前结束：只列出最早达标当天及之前核查到的角色。需要完整排名请勾选“完整扫描”。'));
-      if (others.length) rank.append(table(['名次', '角色', '角色ID', '区服ID', '达标时间', '达标时累计'], others.map(r => [r.place + (r.tied ? '（并列）' : ''), r.roleName, r.roleId, r.serverId, el('span', 'reach-time', r.time), calc.yuan(r.reachedCents)])));
-      else rank.append(el('div', 'muted', '无。'));
-      results.append(rank);
-      const audit = el('section'), auditDetails = el('details');
+      if (others.length || result.stoppedEarly) {
+        const rank = el('section'), rankHead = el('h2', '', `其他达标角色 ${others.length} 名`);
+        if (result.stoppedEarly) { const note = el('span', 'muted', '已提前结束，需完整排名请勾选“完整扫描”'); note.title = '只列出最早达标当天及之前核查到的角色。'; rankHead.append(note); }
+        rank.append(rankHead);
+        if (others.length) rank.append(table(['名次', '角色', '角色ID', ...(multi ? ['区服ID'] : []), '达标时间', '达标时累计'],
+          others.map(r => [r.place + (r.tied ? ' 并列' : ''), cut(r.roleName), r.roleId, ...(multi ? [r.serverId] : []), el('span', 'reach-time', short(r.time)), calc.yuan(r.reachedCents)]),
+          { num: [multi ? 5 : 4] }));
+        results.append(rank);
+      }
+      const audit = el('section'), auditDetails = el('details', 'more');
       // 累充不足门槛、未查订单的角色不列出（只计数）；其余按累充金额从高到低排，同额再按最高单日真实扣款。
       const checks = result.checks.filter(c => c.from).sort((a, b) => (b.role.totalCents ?? -1) - (a.role.totalCents ?? -1) || (b.peakCents || 0) - (a.peakCents || 0));
-      auditDetails.append(el('summary', '', `逐角色订单核对（${checks.length} 名，按累充金额从高到低` +
-        (result.skippedByTotal ? `；另 ${result.skippedByTotal} 名累充不足门槛未查询，不列出` : '') + '）'),
-        table(['角色 / ID', '累充金额', '订单查询日期', '返回订单 / 计入已支付', '最高单日真实扣款', '说明'], checks.map(c => [
-          `${c.role.roleName || ''} / ${c.role.roleId}`,
+      const auditTitle = el('summary', '', `逐角色订单核对 ${checks.length} 名（按累充从高到低）`);
+      if (result.skippedByTotal) auditTitle.title = `另 ${result.skippedByTotal} 名累充不足门槛未查询，不列出`;
+      auditDetails.append(auditTitle,
+        table(['角色', '角色ID', '累充', '查询日期', '订单', '单日最高', '说明'], checks.map(c => [
+          cut(c.role.roleName || ''), c.role.roleId,
           c.role.totalCents == null ? '-' : calc.yuan(c.role.totalCents),
-          `${c.from} 至 ${c.to}`,
+          `${short(c.from)} ~ ${short(c.to)}`,
           `${c.returned} / ${c.paid}`,
-          c.peakDate ? `${c.peakDate}：${yuan(c.peakCents)}` : '-', c.reason
-        ])));
+          c.peakDate ? `${short(c.peakDate)} ${calc.yuan(c.peakCents)}` : '-',
+          c.reason.replace(/^已达标：(\S+ \S+)/, (_, time) => '达标 ' + short(time))
+        ]), { num: [2, 4], wrap: [6], tips: { 查询日期: '订单查询日期范围', 订单: '返回订单数 / 计入的已支付订单数', 单日最高: '最高单日真实扣款' } }));
       audit.append(auditDetails); results.append(audit);
     }
-    const list = el('section'), details = el('details');
+    const list = el('section'), details = el('details', 'more');
     const sorted = players.slice().sort((a, b) => (b.totalCents || 0) - (a.totalCents || 0));
-    details.append(el('summary', '', `所查区服的玩家和累充金额（${players.length} 名，按金额排序）`),
-      table(['角色', '角色ID', '区服ID', '创建时间', '累充金额'], sorted.slice(0, 500).map(p => [p.roleName, p.roleId, p.serverId, p.createdAt, p.totalCents == null ? '-' : calc.yuan(p.totalCents)])));
+    details.append(el('summary', '', `所查区服玩家 ${players.length} 名（按累充排序）`),
+      table(['角色', '角色ID', ...(multi ? ['区服ID'] : []), '创建时间', '累充金额'],
+        sorted.slice(0, 500).map(p => [cut(p.roleName), p.roleId, ...(multi ? [p.serverId] : []), short(p.createdAt), p.totalCents == null ? '-' : calc.yuan(p.totalCents)]),
+        { num: [multi ? 4 : 3] }));
     if (sorted.length > 500) details.append(el('div', 'muted', '只显示前 500 名。'));
     list.append(details); results.append(list);
-    const coverage = el('section');
-    coverage.append(el('h2', '', '覆盖范围'),
-      el('div', '', scope.map(s => `${gameName(s.gid)} · ${s.name}（${s.psid}）`).join('\n')),
-      el('div', 'muted', `读取时间 ${startedAt.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })}` +
-        (result ? ` · 核查订单 ${result.checked} 名角色，按累充金额排除 ${result.skippedByTotal} 名` : '')));
-    coverage.lastChild.style.whiteSpace = 'pre-wrap';
-    results.append(coverage);
   }
 
   // 在原“查询”按钮后插入入口；表单被页面重建时重新插入。
