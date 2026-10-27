@@ -13,14 +13,14 @@
   // 紧凑布局：专服标签与链接同排、链接按钮不在中间折行、底部操作和状态合成一行，尽量少占屏幕。
   style.textContent = `
     :host { color-scheme:light; } * { box-sizing:border-box; }
-    .panel { width:min(380px,calc(100vw - 24px));max-height:calc(100vh - 32px);display:flex;flex-direction:column;border:1px solid #d5ddea;border-radius:10px;
+    .panel { width:min(340px,calc(100vw - 24px));max-height:calc(100vh - 32px);display:flex;flex-direction:column;border:1px solid #d5ddea;border-radius:10px;
       background:#f3f6fb;color:#1f2d42;font:13px/1.45 "Microsoft YaHei","PingFang SC",sans-serif;box-shadow:0 10px 32px #0f1f3a2e;overflow:hidden; }
     header { flex-shrink:0;padding:6px 8px 6px 12px;background:#fff;cursor:move;touch-action:none;user-select:none;border-bottom:1px solid #e3e9f2; }
     .top { display:flex;align-items:baseline;gap:8px; } strong { font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:70%; }
     .source { flex:1;min-width:0;font-size:11px;color:#6b788c;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
     button { font:inherit;font-size:12px;border:0;border-radius:5px;background:#e8eef9;color:#24539f;padding:2px 8px;cursor:pointer;white-space:nowrap; }
     button:hover { background:#d9e5fb; } button.ghost { background:none;color:#5d6b82; } button.ghost:hover { background:#eef2f8;color:#1f2d42; }
-    main { padding:6px;min-height:48px;flex:1;max-height:min(600px,calc(100vh - 110px));overflow:auto;overscroll-behavior:contain; }
+    main { padding:6px;min-height:48px;flex:1;max-height:min(480px,calc(100vh - 110px));overflow:auto;overscroll-behavior:contain; }
     section { background:#fff;border:1px solid #e6ebf3;border-radius:7px;padding:6px 8px;margin-bottom:6px; } section:last-child { margin-bottom:0; }
     h2 { font-size:12px;color:#4b5970;margin:0 0 4px; }
     .group { padding:3px 0; } .group + .group { border-top:1px dashed #e6ebf3; }
