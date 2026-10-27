@@ -298,11 +298,14 @@
       if (result.winners.length > 1) best.append(el('div', 'warn', `${result.winners.length} 名角色在同一时刻达标，列为并列。`));
       for (const w of result.winners) {
         const box = el('div', 'winner'), server = scope.find(s => s.gid === w.gameId && s.psid === w.serverId);
+        // 达标订单默认折叠，需要核对时再展开。
+        const orders = el('details'), orderCents = w.orders.reduce((total, o) => total + o.amountCents, 0);
+        orders.append(el('summary', '', `订单明细（${w.orders.length} 笔，合计 ${yuan(orderCents)}，点击展开）`),
+          table(['订单号', '创建时间', '真实扣款'], w.orders.map(o => [o.orderId, o.createdAt, calc.yuan(o.amountCents)])));
         box.append(el('div', 'big', `${w.roleName || '(无角色名)'} · ${w.roleId}`),
           el('div', '', `${gameName(w.gameId)} · ${server?.name || ''}（区服ID ${w.serverId}）`),
           // 活动常限定达标后几天内申请，达标时间加粗便于核对是否过期。
-          reachLine(w),
-          table(['订单号', '创建时间', '真实扣款'], w.orders.map(o => [o.orderId, o.createdAt, calc.yuan(o.amountCents)])));
+          reachLine(w), orders);
         if (globalThis.WorkToolRoleCopy && w.roleName && server?.name) {
           const name = el('span','',w.roleName);
           globalThis.WorkToolRoleCopy.bindName(name,() => ({roleId: w.roleId, roleName: w.roleName, serverName: server.name}));
@@ -319,11 +322,15 @@
       else rank.append(el('div', 'muted', '无。'));
       results.append(rank);
       const audit = el('section'), auditDetails = el('details');
-      auditDetails.append(el('summary', '', `逐角色订单核对（${result.checks.length} 名，可排查未达标原因）`),
-        table(['角色 / ID', '订单查询日期', '返回订单 / 计入已支付', '最高单日真实扣款', '说明'], result.checks.map(c => [
+      // 累充不足门槛、未查订单的角色不列出（只计数）；其余按累充金额从高到低排，同额再按最高单日真实扣款。
+      const checks = result.checks.filter(c => c.from).sort((a, b) => (b.role.totalCents ?? -1) - (a.role.totalCents ?? -1) || (b.peakCents || 0) - (a.peakCents || 0));
+      auditDetails.append(el('summary', '', `逐角色订单核对（${checks.length} 名，按累充金额从高到低` +
+        (result.skippedByTotal ? `；另 ${result.skippedByTotal} 名累充不足门槛未查询，不列出` : '') + '）'),
+        table(['角色 / ID', '累充金额', '订单查询日期', '返回订单 / 计入已支付', '最高单日真实扣款', '说明'], checks.map(c => [
           `${c.role.roleName || ''} / ${c.role.roleId}`,
-          c.from ? `${c.from} 至 ${c.to}` : '未查询',
-          c.from ? `${c.returned} / ${c.paid}` : '-',
+          c.role.totalCents == null ? '-' : calc.yuan(c.role.totalCents),
+          `${c.from} 至 ${c.to}`,
+          `${c.returned} / ${c.paid}`,
           c.peakDate ? `${c.peakDate}：${yuan(c.peakCents)}` : '-', c.reason
         ])));
       audit.append(auditDetails); results.append(audit);
