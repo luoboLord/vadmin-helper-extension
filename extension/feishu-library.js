@@ -79,27 +79,33 @@
     };
     return clean(Array.isArray(v)?v.reduce((text,s)=>{before=text;return text+segment(s);},''):segment(v));
   }
-  function records(table,required){
+  function cellValue(cell,field){
+    if(![3,4].includes(field.type))return value(cell,field.name==='URL',COMPACT_CATEGORIES.includes(field.name));
+    const raw=cell?.value;if(raw==null||raw==='')return '';
+    const options=field.property?.options;
+    if(!Array.isArray(options))throw Error('选项字段缺少定义：'+field.name);
+    const names=new Map(options.map(o=>[o.id,o.name]));
+    const items=Array.isArray(raw)?raw:[raw];
+    if(field.type===3&&items.length!==1)throw Error('单选字段返回多值：'+field.name);
+    return items.map(id=>{
+      if(typeof id!=='string'||!names.has(id)||typeof names.get(id)!=='string')throw Error('选项值不在字段定义中：'+field.name);
+      return names.get(id);
+    }).join('\n');
+  }
+  // 按表格排序返回记录编号及解析后的行；records() 只要行。
+  function recordList(table,required){
     const fields=Object.entries(table.fieldMap||{}),names=fields.map(([,f])=>f.name);
     if(new Set(names).size!==names.length)throw Error('表格存在重名字段');
     const missing=required.filter(name=>!names.includes(name));if(missing.length)throw Error('表格缺少字段：'+missing.join('、'));
     const ranks=table.rankInfo?.rankMap||{},ids=Object.keys(table.recordMap||{});
     if(!Number.isInteger(table.recordCount)||table.recordCount!==ids.length||table.recordCount>1000)throw Error('表格未完整读取或超过1000条，已保留旧数据；请勿继续使用不完整结果');
     ids.sort((a,b)=>{const x=ranks[a]??'',y=ranks[b]??'';return x<y?-1:x>y?1:0;});
-    const cellValue=(cell,field)=>{
-      if(![3,4].includes(field.type))return value(cell,field.name==='URL',COMPACT_CATEGORIES.includes(field.name));
-      const raw=cell?.value;if(raw==null||raw==='')return '';
-      const options=field.property?.options;
-      if(!Array.isArray(options))throw Error('选项字段缺少定义：'+field.name);
-      const names=new Map(options.map(o=>[o.id,o.name]));
-      const items=Array.isArray(raw)?raw:[raw];
-      if(field.type===3&&items.length!==1)throw Error('单选字段返回多值：'+field.name);
-      return items.map(id=>{
-        if(typeof id!=='string'||!names.has(id)||typeof names.get(id)!=='string')throw Error('选项值不在字段定义中：'+field.name);
-        return names.get(id);
-      }).join('\n');
-    };
-    return ids.map(id=>Object.fromEntries(fields.map(([key,f])=>[f.name,cellValue(table.recordMap[id][key],f)])));
+    return {ids,rows:ids.map(id=>Object.fromEntries(fields.map(([key,f])=>[f.name,cellValue(table.recordMap[id][key],f)])))};
+  }
+  const records=(table,required)=>recordList(table,required).rows;
+  // 字段结构摘要：字段编号、名称、类型及选项任一变化都视为目标改变。
+  function schema(table){
+    return JSON.stringify(Object.entries(table.fieldMap||{}).sort(([a],[b])=>a<b?-1:a>b?1:0).map(([id,f])=>[id,f.name,f.type,(f.property?.options||[]).map(o=>[o.id,o.name])]));
   }
   function identity(row){
     const full=clean(row['完整名称']);if(!full)throw Error('游戏记录缺少完整名称');
@@ -154,7 +160,22 @@
     const data=root.WorkToolWorkbook.payload({links,aliases,manual:manual.filter(r=>activeFulls.has(r['完整名称']))});
     return {data:{...data,categories:root.WorkToolData?.categories||[],public:publicLinks},counts:{records:library.length,links:links.filter(r=>r['URL']).length,public:publicLinks.length,games:data.games.length,pending:pending.length}};
   }
-  async function read(config,fetcher=fetch){
+  // 读取一张数据表的最新快照；写入流程用它取版本、排序和按记录编号核实。
+  async function readTable(src,tableId='',needBase=false,fetcher=fetch){
+    const u=new URL(src.origin+'/space/api/v1/bitable/'+src.token+'/clientvars');
+    u.searchParams.set('recordLimit','1000');u.searchParams.set('needBase',String(needBase));if(tableId)u.searchParams.set('tableID',tableId);
+    const response=await fetcher(u.href,{credentials:'include',redirect:'manual',cache:'no-store',signal:AbortSignal.timeout(20000)});
+    if(response.type==='opaqueredirect'||[301,302,401].includes(response.status))throw Error('请先在当前浏览器登录飞书，再刷新数据');
+    if(!response.ok)throw Error('飞书读取失败（HTTP '+response.status+'），请检查登录和表格访问权限');
+    let json;try{json=JSON.parse(await response.text());}catch{throw Error('请先在当前浏览器登录飞书，再刷新数据');}
+    if(json.code!==0||!json.data?.table)throw Error('飞书拒绝读取，请检查登录、表格地址和访问权限');
+    return {table:await unzip(json.data.table),base:json.data.base?await unzip(json.data.base):null};
+  }
+  const LIBRARY_FIELDS=['链接名称','记录类型','完整名称','专服','类别','URL','状态','排序'];
+  const COMPACT_FIELDS=['完整名称','专服','记录类型','状态','排序',...COMPACT_CATEGORIES,'游戏备注'];
+  const CONFIG_FIELDS=['完整名称','游戏','版本','游戏别名','后台游戏ID'];
+  // requireCompact：写入只支持精简表，且三张表都必须本次完整读取，不退回缓存。
+  async function readTables(config,{requireCompact=false}={},fetcher=fetch){
     if(!clean(config?.url))throw Error('请先在数据管理配置飞书链接库地址');
     let src=source(config?.url);
     if(src.kind==='wiki'){
@@ -162,30 +183,27 @@
       if(!response.ok||response.type==='opaqueredirect')throw Error('知识库解析失败，请先登录飞书并确认访问权限');
       src=source(src.origin+'/base/'+wikiBaseToken(await response.text(),src.token));
     }
-    async function request(tableId='',needBase=false){
-      const u=new URL(src.origin+'/space/api/v1/bitable/'+src.token+'/clientvars');
-      u.searchParams.set('recordLimit','1000');u.searchParams.set('needBase',String(needBase));if(tableId)u.searchParams.set('tableID',tableId);
-      const response=await fetcher(u.href,{credentials:'include',redirect:'manual',signal:AbortSignal.timeout(20000)});
-      if(response.type==='opaqueredirect'||[301,302,401].includes(response.status))throw Error('请先在当前浏览器登录飞书，再刷新数据');
-      if(!response.ok)throw Error('飞书读取失败（HTTP '+response.status+'），请检查登录和表格访问权限');
-      let json;try{json=JSON.parse(await response.text());}catch{throw Error('请先在当前浏览器登录飞书，再刷新数据');}
-      if(json.code!==0||!json.data?.table)throw Error('飞书拒绝读取，请检查登录、表格地址和访问权限');
-      return {table:await unzip(json.data.table),base:json.data.base?await unzip(json.data.base):null};
-    }
-    const first=await request('',true);
+    const first=await readTable(src,'',true,fetcher);
     const tables=Object.entries(first.base?.blockInfos||{}).map(([key,b])=>({id:b.id||key,name:b.name})).filter(t=>t.id.startsWith('tbl'));
     const find=name=>{const matches=tables.filter(t=>t.name===name);if(matches.length!==1)throw Error('请先导入并保留唯一的“'+name+'”数据表');return matches[0].id;};
     const compact=tables.filter(t=>t.name==='链接库_精简');
     if(compact.length>1)throw Error('请保留唯一的“链接库_精简”数据表');
+    if(requireCompact&&!compact.length)throw Error('自动写入只支持“链接库_精简”数据表，请先迁移到精简表');
     const libId=compact.length?compact[0].id:find('链接库'),settingsId=find('游戏配置');
-    const library=await request(libId),settings=await request(settingsId);
-    const configRows=records(settings.table,['完整名称','游戏','版本','游戏别名','后台游戏ID']);
+    const library=await readTable(src,libId,false,fetcher),settings=await readTable(src,settingsId,false,fetcher);
+    const configList=recordList(settings.table,CONFIG_FIELDS);
     const isCompact=compact.length>0;
-    const libraryRows=records(library.table,isCompact?['完整名称','专服','记录类型','状态','排序',...COMPACT_CATEGORIES,'游戏备注']:['链接名称','记录类型','完整名称','专服','类别','URL','状态','排序']);
-    const result=payload(isCompact?expandCompact(libraryRows,configRows):libraryRows,configRows);
-    if(isCompact)result.counts.records=libraryRows.length;
-    return {...result,source:src.url,editorURL:src.url+'?table='+encodeURIComponent(libId)};
+    const libraryList=recordList(library.table,isCompact?COMPACT_FIELDS:LIBRARY_FIELDS);
+    const result=payload(isCompact?expandCompact(libraryList.rows,configList.rows):libraryList.rows,configList.rows);
+    if(isCompact)result.counts.records=libraryList.rows.length;
+    const describe=(id,name,table,list)=>({id,name,table,ids:list.ids,rows:list.rows,schema:schema(table)});
+    return {result,source:src.url,origin:src.origin,base:src.token,compact:isCompact,editorURL:src.url+'?table='+encodeURIComponent(libId),
+      library:describe(libId,isCompact?'链接库_精简':'链接库',library.table,libraryList),settings:describe(settingsId,'游戏配置',settings.table,configList)};
   }
-  const api={DEFAULT_URL,COMPACT_CATEGORIES,expandCompact,source,wikiBaseToken,value,records,payload,read};root.WorkToolFeishu=api;
+  async function read(config,fetcher=fetch){
+    const r=await readTables(config,{},fetcher);
+    return {...r.result,source:r.source,editorURL:r.editorURL};
+  }
+  const api={DEFAULT_URL,COMPACT_CATEGORIES,COMPACT_FIELDS,CONFIG_FIELDS,expandCompact,source,wikiBaseToken,value,cellValue,recordList,records,schema,identity,payload,readTable,readTables,read};root.WorkToolFeishu=api;
   if(typeof module!=='undefined')module.exports=api;
 })(globalThis);

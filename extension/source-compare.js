@@ -102,6 +102,6 @@
     return {groups:list,newGames,public:publicLinks,tsv:tsv.length>1?tsv.join('\n'):'',warnings:sheet.warnings||[],
       counts:{sourceLinks,missingLinks,newGames:newGames.length,publicMissing:publicLinks.length}};
   }
-  const api={source,extractSnapshot,read,urlKey,line,compare};
+  const api={source,extractSnapshot,read,urlKey,norm,part,line,ORDER,compare};
   root.WorkToolSourceCompare=api;if(typeof module!=='undefined'&&module.exports)module.exports=api;
 })(globalThis);

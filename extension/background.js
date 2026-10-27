@@ -1,7 +1,10 @@
 'use strict';
 // service-worker.js imports these as modules first; importScripts is only for classic loading (tests).
-if(!globalThis.WorkToolUpdateService)importScripts('data.js','core.js','entries.js','workbook.js','feishu-library.js','feishu-sheet.js','source-compare.js','local-update.js','github-update.js','update-service.js');
+if(!globalThis.WorkToolUpdateService)importScripts('data.js','core.js','entries.js','workbook.js','feishu-library.js','feishu-sheet.js','source-compare.js','feishu-sync.js','feishu-write.js','feishu-sync-job.js','local-update.js','github-update.js','update-service.js');
 const updates = WorkToolUpdateService.create({chrome});
+// 写入任务的进度摘要放在 storage.local，管理页据此刷新；任务和备份本身在 IndexedDB。
+const sync = WorkToolFeishuSyncJob.create({chrome,getConfig:()=>getConfig(),refresh:()=>refresh(),readSheet:url=>WorkToolSourceCompare.read(url),
+  notify:feishuSyncStatus=>chrome.storage.local.set({feishuSyncStatus}),...globalThis.__workToolSyncDeps});
 let opening,refreshing;
 const interval=15*60*1000;
 const getConfig=async()=>{
@@ -111,6 +114,7 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
     }
     if(message.type==='feishu:refresh')return refresh();
     if(message.type==='feishu:configure'){
+      if(sync.busy())throw Error('正在写入飞书，完成或暂停后才能切换数据源');
       const src=WorkToolFeishu.source(message.url);
       await chrome.storage.local.set({feishuConfig:{url:src.url,revision:Date.now()+':'+Math.random()}});
       if(refreshing)await refreshing;
@@ -126,6 +130,17 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
       const result=WorkToolSourceCompare.compare(sheet,linkSnapshot.data);
       return {ok:true,result:{...result,source:sheet.source,checkedAt:Date.now(),libraryUpdatedAt:linkSnapshot.updatedAt,libraryError:fresh.ok?'':fresh.error}};
     }
+    // 写入：重新读取原表、链接库和游戏配置（不用缓存），生成清单待确认；确认后后台串行写入并读回核实。
+    if(message.type==='source:sync:prepare'){
+      const url=WorkToolSourceCompare.source(message.url).url;
+      await chrome.storage.local.set({sourceSheetConfig:{url}});
+      return {ok:true,job:await sync.prepare(url)};
+    }
+    if(message.type==='source:sync:run')return {ok:true,job:await sync.run(message.id)};
+    if(message.type==='source:sync:resume')return {ok:true,job:await sync.resume(message.id)};
+    if(message.type==='source:sync:abandon')return {ok:true,job:await sync.abandon(message.id)};
+    if(message.type==='source:sync:status')return {ok:true,job:await sync.status()};
+    if(message.type==='source:sync:backup')return {ok:true,backup:await sync.backup(message.id)};
     throw Error('不支持的操作');
   })().then(reply,error=>reply({ok:false,error:error.message}));
   return true;
