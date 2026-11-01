@@ -76,10 +76,19 @@
 
   // 位置和大小记在本页（后台域名）的 localStorage，下次打开沿用；读写失败时用默认值。
   const LAYOUT_KEY = 'workToolCrownLayout';
-  function clampPosition() {
+  function filterBottom() {
+    const game = document.querySelector('#form_gid');
+    const form = game?.closest('form') || document.querySelector('#search_form');
+    // Select2 的原 select 可能隐藏；按整个筛选表单留空，连同角色 ID 和查询按钮一起避开。
+    const rect = form?.getBoundingClientRect();
+    return rect?.height ? rect.bottom : (game?.getBoundingClientRect().bottom || 44);
+  }
+  function clampPosition({ avoidFilters = false } = {}) {
     if (host.style.display === 'none') return;
     const left = Math.max(8, Math.min(parseFloat(host.style.left) || 16, innerWidth - Math.min(host.offsetWidth, innerWidth - 16) - 8));
-    const top = Math.max(8, Math.min(parseFloat(host.style.top) || 56, innerHeight - 120));
+    // 每次弹出都把旧版保存的过高位置下移；手动拖动时仍可自由调整。
+    const minTop = avoidFilters ? Math.max(8, Math.min(filterBottom() + 12, innerHeight - 48)) : 8;
+    const top = Math.max(minTop, Math.min(parseFloat(host.style.top) || 56, Math.max(minTop, innerHeight - 120)));
     host.style.left = left + 'px'; host.style.top = top + 'px';
     panel.style.maxHeight = (innerHeight - top - 8) + 'px';
     panel.style.maxWidth = (innerWidth - left - 8) + 'px';
@@ -104,7 +113,7 @@
   });
   const endDrag = () => { if (drag) { drag = null; saveLayout(); } };
   header.addEventListener('pointerup', endDrag); header.addEventListener('lostpointercapture', endDrag);
-  window.addEventListener('resize', clampPosition);
+  window.addEventListener('resize', () => clampPosition({ avoidFilters: true }));
   // 拖右下角改大小后浏览器写入 width/height 内联样式，停下后保存。
   let resizeTimer;
   new ResizeObserver(() => { if (!panel.style.width && !panel.style.height) return; clearTimeout(resizeTimer); resizeTimer = setTimeout(saveLayout, 300); }).observe(panel);
@@ -140,7 +149,7 @@
   // 从当前已查询的结果读取游戏和区服：游戏取筛选框；区服取结果表的区服列及筛选框。
   // 订单页“游戏区服ID”列是区服名称，玩家信息页“区服ID”列是“区服ID-名称”。只在点击按钮时读一次表格。
   const SERVER_COLUMNS = ['游戏区服ID', '区服ID'];
-  async function readTargets() {
+  async function readTargets(signal) {
     // 玩家信息页的游戏框可多选，必须恰好选中一个游戏。
     const chosen = [...(document.querySelector('select#form_gid')?.selectedOptions || [])].filter(o => o.value && o.value !== '0');
     if (chosen.length > 1) return { error: '请只选择一个游戏后再查冠名权。' };
@@ -156,7 +165,7 @@
       const cell = tr.children[column];
       if (cell && cell.textContent.trim() && !tr.querySelector('.dataTables_empty')) cells.add(cell.textContent.trim());
     }
-    const list = await api.servers(gid);
+    const list = await api.servers(gid, { signal });
     const picked = document.querySelector('select#form_psid')?.value;
     const targets = [], unknown = [];
     for (const value of cells) {
@@ -179,32 +188,75 @@
     return (await storage.get(configKey(gid)))[configKey(gid)] || null;
   }
   // 双向保存：同时更新本组每个共服游戏自己的设置（含从本组移除的游戏）。
-  async function saveConfig(gid, config) {
+  async function saveConfig(gid, config, current) {
     if (!storage) return;
     const old = await loadConfig(gid);
+    if (!current()) return;
     const ids = [...new Set([gid, ...(old?.games || []).map(g => g.gid), ...config.games.map(g => g.gid)].map(String))];
     const stored = await storage.get(ids.map(configKey)), configs = {};
+    if (!current()) return;
     for (const id of ids) if (stored[configKey(id)]) configs[id] = stored[configKey(id)];
     const linked = calc.linkShared(configs, gid, config), savedAt = Date.now(), items = {};
     for (const [id, value] of Object.entries(linked)) items[configKey(id)] = { ...value, savedAt };
     await storage.set(items);
   }
 
-  let task = null;
-  const serverCache = new Map();
-  const serversOf = gid => { if (!serverCache.has(gid)) serverCache.set(gid, api.servers(gid).catch(error => { serverCache.delete(gid); throw error; })); return serverCache.get(gid); };
+  let task = null, view = null;
+  const selectionKey = () => JSON.stringify([...new Set([...(document.querySelector('select#form_gid')?.selectedOptions || [])]
+    .map(o => o.value).filter(id => id && id !== '0'))].sort());
+  let lastSelection = selectionKey();
+  function syncSelection() {
+    const key = selectionKey();
+    if (key === lastSelection) return;
+    lastSelection = key;
+    const previous = view, previousTask = task;
+    view = null; task = null;
+    previous?.controller.abort(Error('游戏已切换'));
+    previousTask?.abort(Error('游戏已切换'));
+    host.style.display = 'none';
+    main.replaceChildren(); sub.textContent = sub.title = '';
+    panel.classList.remove('collapsed'); fold.textContent = '收起';
+  }
+  document.addEventListener('change', syncSelection, true);
+  document.addEventListener('input', syncSelection, true);
+  document.addEventListener('reset', () => setTimeout(syncSelection, 0), true);
+  document.addEventListener('visibilitychange', syncSelection);
+  window.addEventListener('pageshow', syncSelection);
+  // Select2 的 jQuery change / .val() 可能没有原生事件；只读取选中 ID，不扫描结果表。
+  setInterval(syncSelection, 250);
 
   async function open() {
-    host.style.display = 'block'; clampPosition();
-    if (task) return;
+    syncSelection();
+    host.style.display = 'block'; clampPosition({ avoidFilters: true });
+    if (task || view?.loading || view?.preparing) return;
+    view?.controller.abort();
+    const session = { controller: new AbortController(), loading: true, preparing: false };
+    view = session;
+    // 每次异步返回也核对选择，避免未发送事件时在轮询前继续启动旧查询。
+    const current = () => { syncSelection(); return view === session && !session.controller.signal.aborted; };
+    session.current = current;
+    const serverCache = new Map();
+    const serversOf = gid => {
+      if (!serverCache.has(gid)) serverCache.set(gid, api.servers(gid, { signal: session.controller.signal })
+        .catch(error => { serverCache.delete(gid); throw error; }));
+      return serverCache.get(gid);
+    };
     main.replaceChildren(el('div', 'muted', '正在读取当前查询结果…'));
     let info;
-    try { info = await readTargets(); } catch (error) { info = { error: error.message }; }
+    try { info = await readTargets(session.controller.signal); } catch (error) { info = { error: error.message }; }
+    if (!current()) return;
     main.replaceChildren();
-    if (info.error) { sub.textContent = ''; main.append(el('div', 'warn', info.error)); return; }
+    if (info.error) { session.loading = false; sub.textContent = sub.title = ''; main.append(el('div', 'warn', info.error)); return; }
     sub.textContent = sub.title = gameName(info.gid);
     serverCache.set(info.gid, Promise.resolve(info.servers));
-    const saved = await loadConfig(info.gid);
+    let saved;
+    try { saved = await loadConfig(info.gid); }
+    catch (error) {
+      if (current()) { session.loading = false; main.append(el('div', 'bad', '无法读取共服设置：' + error.message)); }
+      return;
+    }
+    if (!current()) return;
+    session.loading = false;
     const config = { games: (saved?.games || []).map(g => ({ ...g, map: { ...(g.map || {}) } })) };
 
     // 设置区：第一行区服和门槛，第二行完整扫描和共服搜索；开始查询后折叠成一行摘要。
@@ -243,6 +295,7 @@
     setup.append(firstRow, secondRow, matches, sharedList);
     if (info.unknown.length) setup.append(el('div', 'warn', `未能识别的区服：${info.unknown.join('、')}`));
     function renderShared() {
+      if (!current()) return;
       sharedList.replaceChildren();
       for (const game of config.games) {
         const row = el('div', 'shared-row'), input = el('input'), same = el('input'), sameLabel = el('label'), hint = el('span', 'hint');
@@ -254,7 +307,7 @@
         const check = async () => {
           const value = same.checked ? targetSelect.value : input.value.trim();
           if (!same.checked) { if (value) game.map[targetSelect.value] = value; else delete game.map[targetSelect.value]; }
-          const show = (text, ok) => { hint.textContent = hint.title = text; hint.className = 'hint ' + (ok ? 'good' : 'badtext'); };
+          const show = (text, ok) => { if (!current()) return; hint.textContent = hint.title = text; hint.className = 'hint ' + (ok ? 'good' : 'badtext'); };
           if (!value) { show('请填写对应区服ID', false); return; }
           try { const hit = (await serversOf(game.gid)).find(s => s.psid === value); show(hit ? '✓ ' + hit.name : '该游戏没有这个区服ID', !!hit); }
           catch (error) { show(error.message, false); }
@@ -283,14 +336,15 @@
 
     // 开始查询放在设置区外面，设置折叠后也能直接再次查询。
     const actions = el('div', 'row actions'), start = button('开始查询', null, 'primary'), status = el('div');
-    actions.append(start, el('span', 'muted', '查询期间请勿刷新页面，不改变当前查询条件'));
+    actions.append(start, el('span', 'muted', '查询期间请勿刷新页面；切换游戏将关闭窗口并取消查询'));
     const progress = el('section', 'progress'); progress.hidden = true;
     const results = el('div');
     main.append(setup, actions, status, progress, results);
 
     start.onclick = async () => {
       // 核对共服区服和保存设置需要等待，点击后立即禁用，避免连点同时启动两轮扫描。
-      if (start.disabled || task) return;
+      if (!current() || start.disabled || task || session.preparing) return;
+      session.preparing = true;
       start.disabled = true;
       let launched = false;
       try {
@@ -302,23 +356,27 @@
         for (const game of config.games) {
           const psid = game.sameIds ? base.psid : game.map[base.psid];
           const hit = psid && (await serversOf(game.gid).catch(() => [])).find(s => s.psid === psid);
+          if (!current()) return;
           if (!hit) { status.append(el('div', 'bad', `请为共服游戏 ${gameName(game.gid)} 填写有效的对应区服ID。`)); return; }
           scope.push({ gid: game.gid, psid, name: hit.name });
         }
-        await saveConfig(info.gid, config);
+        await saveConfig(info.gid, config, current);
+        if (!current()) return;
         launched = true;
         brief.textContent = brief.title = `${base.name}（${base.psid}） · 门槛 ${yuan(thresholdCents)}` + (config.games.length ? ` · 共服 ${config.games.length} 款` : '') + (full.checked ? ' · 完整扫描' : '');
         setup.open = false;
-        run({ scope, thresholdCents, fullScan: full.checked, start, progress, results, setup, done: renderShared });
+        run({ session, scope, thresholdCents, fullScan: full.checked, start, progress, results, setup, done: renderShared });
       } catch (error) {
-        status.append(el('div', 'bad', '无法开始查询：' + error.message));
+        if (current()) status.append(el('div', 'bad', '无法开始查询：' + error.message));
       } finally {
-        if (!launched) start.disabled = false;
+        session.preparing = false;
+        if (current() && !launched) start.disabled = false;
       }
     };
   }
 
-  async function run({ scope, thresholdCents, fullScan, start, progress, results, setup, done }) {
+  async function run({ session, scope, thresholdCents, fullScan, start, progress, results, setup, done }) {
+    if (!session.current()) return;
     const controller = new AbortController();
     task = controller;
     const lock = pending => { for (const node of setup.querySelectorAll('input,select,button')) node.disabled = pending; start.disabled = pending; };
@@ -331,20 +389,23 @@
     try {
       for (const [index, target] of scope.entries()) {
         const read = await api.players(target, { signal: controller.signal,
-          onPage: p => { line.textContent = `读取玩家：${gameName(target.gid)} · ${target.name}（${index + 1}/${scope.length}）${p.read}/${p.total}`; } });
+          onPage: p => { if (session.current() && !controller.signal.aborted) line.textContent = `读取玩家：${gameName(target.gid)} · ${target.name}（${index + 1}/${scope.length}）${p.read}/${p.total}`; } });
+        if (!session.current()) return;
+        controller.signal.throwIfAborted();
         players.push(...read.players);
         if (!read.complete) issues.push({ role: target, reason: `${gameName(target.gid)} · ${target.name}：${read.reason}` });
       }
       const today = api.beijingToday();
       result = await calc.search({ candidates: players, thresholdCents, excludeByTotal: true, fullScan, today, signal: controller.signal,
         fetchOrders: (role, from, to) => api.orders(role, from, to, { signal: controller.signal }),
-        onProgress: p => { line.textContent = `核查订单：${p.index + 1}/${p.total} · ${p.role.roleName || p.role.roleId}` + (p.best ? ` · 当前最早达标 ${p.best}` : ''); } });
+        onProgress: p => { if (session.current() && !controller.signal.aborted) line.textContent = `核查订单：${p.index + 1}/${p.total} · ${p.role.roleName || p.role.roleId}` + (p.best ? ` · 当前最早达标 ${p.best}` : ''); } });
     } catch (error) {
       fatal = controller.signal.aborted ? '已取消，查询结果不完整。' : error.message;
     } finally {
-      task = null; lock(false); done(); progress.hidden = true;
+      if (task === controller) task = null;
+      if (session.current()) { lock(false); done(); progress.hidden = true; }
     }
-    render({ result, fatal, issues, players, scope, thresholdCents, startedAt, results });
+    if (session.current()) render({ result, fatal, issues, players, scope, thresholdCents, startedAt, results });
   }
 
   function render({ result, fatal, issues, players, scope, thresholdCents, startedAt, results }) {
