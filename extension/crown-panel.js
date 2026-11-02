@@ -3,6 +3,10 @@
   const calc = globalThis.WorkToolCrown, api = globalThis.WorkToolCrownFetch;
   if (!calc || !api || !/^\/(?:order\/ls|game\/playerinfo)\/?$/.test(location.pathname)) return;
   const storage = globalThis.chrome?.storage?.local;
+  const runtime = globalThis.chrome?.runtime;
+  function requireActiveExtension() {
+    if (runtime && !runtime.id) throw Error('Extension context invalidated.');
+  }
 
   const host = document.createElement('div');
   host.id = 'work-tool-crown';
@@ -67,6 +71,15 @@
     return node;
   };
   const button = (label, onclick, className = '') => { const b = el('button', className, label); b.type = 'button'; b.onclick = onclick; return b; };
+  function showFailure(container, prefix, error) {
+    // 扩展更新/重载后，旧页面仍留有脚本，但已不能访问原扩展的存储。
+    // 不能用空共服设置继续查询；由使用者刷新页面，重新注入有效脚本。
+    const invalidated = /extension context invalidated/i.test(error?.message || String(error));
+    container.append(el('div', 'bad', invalidated
+      ? '扩展连接已失效（通常发生在更新或重新加载后）。请刷新当前后台页面，再查冠名权。'
+      : prefix + (error?.message || String(error))));
+    if (invalidated) container.append(button('刷新当前页面', () => location.reload(), 'primary'));
+  }
   const panel = el('aside', 'panel'), header = el('header'), title = el('span', 'title', '查冠名权'), sub = el('span', 'sub'), main = el('main');
   panel.setAttribute('aria-label', '查冠名权');
   // 收起只留标题栏，方便查看下面的后台信息；关闭只隐藏面板，查询进行中再次打开可继续查看进度。
@@ -184,11 +197,13 @@
 
   const configKey = gid => 'crown:shared:' + gid;
   async function loadConfig(gid) {
+    requireActiveExtension();
     if (!storage) return { games: [] };
     return (await storage.get(configKey(gid)))[configKey(gid)] || null;
   }
   // 双向保存：同时更新本组每个共服游戏自己的设置（含从本组移除的游戏）。
   async function saveConfig(gid, config, current) {
+    requireActiveExtension();
     if (!storage) return;
     const old = await loadConfig(gid);
     if (!current()) return;
@@ -242,6 +257,8 @@
       return serverCache.get(gid);
     };
     main.replaceChildren(el('div', 'muted', '正在读取当前查询结果…'));
+    try { requireActiveExtension(); }
+    catch (error) { session.loading = false; main.replaceChildren(); showFailure(main, '', error); return; }
     let info;
     try { info = await readTargets(session.controller.signal); } catch (error) { info = { error: error.message }; }
     if (!current()) return;
@@ -252,7 +269,7 @@
     let saved;
     try { saved = await loadConfig(info.gid); }
     catch (error) {
-      if (current()) { session.loading = false; main.append(el('div', 'bad', '无法读取共服设置：' + error.message)); }
+      if (current()) { session.loading = false; showFailure(main, '无法读取共服设置：', error); }
       return;
     }
     if (!current()) return;
@@ -349,6 +366,7 @@
       let launched = false;
       try {
         status.replaceChildren(); results.replaceChildren();
+        requireActiveExtension();
         const thresholdCents = calc.toCents(thresholdValue);
         if (!thresholdCents || thresholdCents <= 0) { status.append(el('div', 'bad', '请填写大于 0 的充值门槛，最多两位小数。')); return; }
         const base = info.targets.find(t => t.psid === targetSelect.value);
@@ -367,7 +385,7 @@
         setup.open = false;
         run({ session, scope, thresholdCents, fullScan: full.checked, start, progress, results, setup, done: renderShared });
       } catch (error) {
-        if (current()) status.append(el('div', 'bad', '无法开始查询：' + error.message));
+        if (current()) showFailure(status, '无法开始查询：', error);
       } finally {
         session.preparing = false;
         if (current() && !launched) start.disabled = false;
