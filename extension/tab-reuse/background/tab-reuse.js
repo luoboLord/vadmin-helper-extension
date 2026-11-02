@@ -3,6 +3,7 @@ import {
   getReuseGroupKey,
   getSheetInfo,
   getUrlKey,
+  parseSupportedUrl,
 } from "./url-normalizer.js";
 import { getEffectiveTabUrl, selectMostRecentTab } from "./tab-utils.js";
 import { createSheetSwitcher } from "./sheet-switch.js";
@@ -55,6 +56,15 @@ export function createTabReuseController(
       updateProperties,
       targetSheet: needsSheetSwitch ? targetSheet : null,
     };
+  }
+
+  // Normalization used for matching deliberately ignores fragments and share
+  // parameters. Closing a new tab requires a stronger check: it must still be
+  // the exact navigation Chrome created for this request.
+  function isRequestedTarget(tab, targetUrl) {
+    const currentUrl = parseSupportedUrl(getEffectiveTabUrl(tab))?.href;
+    const requestedUrl = parseSupportedUrl(targetUrl)?.href;
+    return Boolean(currentUrl && requestedUrl) && currentUrl === requestedUrl;
   }
 
   // The reuse statistics are informational only, so failing to save them must
@@ -115,11 +125,13 @@ export function createTabReuseController(
     }
     if (currentKey !== getUrlKey(existingUrl)) {
       // The user navigated the tab themselves; their newer navigation wins.
-      return { action: "reused", existingTabId: existingTab.id, switched: "superseded" };
+      // The intercepted target still needs to open instead of disappearing.
+      await reopen();
+      return { action: "opened", reason: "superseded" };
     }
 
     try {
-      await chromeApi.tabs.update(existingTab.id, { url: getUrlKey(targetUrl) });
+      await chromeApi.tabs.update(existingTab.id, { url: targetUrl });
     } catch (error) {
       logger.warn?.("Failed to navigate the existing tab to the target sheet; opening it in a new tab.", error);
       await reopen();
@@ -139,6 +151,23 @@ export function createTabReuseController(
       return { action: "ignored" };
     }
 
+    // Ctrl-click and middle-click deliberately create background tabs. Keep
+    // those native semantics instead of focusing another tab and closing the
+    // one the user just asked Chrome to open; new windows are handled below.
+    if (targetTab.active === false) {
+      return { action: "opened", reason: "background" };
+    }
+    if (Number.isInteger(details.sourceTabId) && details.sourceTabId >= 0
+      && details.sourceTabId !== details.tabId) {
+      const sourceTab = await chromeApi.tabs.get(details.sourceTabId);
+      if (sourceTab.windowId !== targetTab.windowId) {
+        return { action: "opened", reason: "new-window" };
+      }
+    }
+    if (!isRequestedTarget(targetTab, targetUrl)) {
+      return { action: "changed" };
+    }
+
     const tabs = await chromeApi.tabs.query({ windowType: "normal" });
     const plan = planReuse(tabs, targetUrl, groupKey, {
       excludedTabId: details.tabId,
@@ -154,7 +183,7 @@ export function createTabReuseController(
     await bringForward(plan, targetTab.windowId, targetWindow.focused);
 
     const latestTarget = await chromeApi.tabs.get(details.tabId);
-    if (getReuseGroupKey(getEffectiveTabUrl(latestTarget) || targetUrl) !== groupKey) {
+    if (!isRequestedTarget(latestTarget, targetUrl)) {
       return { action: "changed" };
     }
 
@@ -258,6 +287,13 @@ export function createTabReuseController(
     return enqueue(groupKey, () => reuseForLinkClick(targetUrl, sourceTab, groupKey));
   }
 
+  async function openLinkAfterFailure(targetUrl, sourceTabId) {
+    // Verify that the source still exists before recovering. If the user has
+    // closed it, that newer action wins and no replacement tab is forced open.
+    const sourceTab = await chromeApi.tabs.get(sourceTabId);
+    return openLinkTab(targetUrl, sourceTab);
+  }
+
   return {
     async handleCreatedNavigationTarget(details) {
       try {
@@ -272,8 +308,14 @@ export function createTabReuseController(
       try {
         return await processLinkClick(targetUrl, sourceTabId);
       } catch (error) {
-        logger.error?.("Failed to reuse a tab for an intercepted link click.", error);
-        return { action: "error", error };
+        logger.error?.("Failed to reuse a tab for an intercepted link click; opening the target instead.", error);
+        try {
+          await openLinkAfterFailure(targetUrl, sourceTabId);
+          return { action: "opened", reason: "handle-failed" };
+        } catch (fallbackError) {
+          logger.error?.("Failed to open a target after link reuse failed.", fallbackError);
+          return { action: "error", error: fallbackError };
+        }
       }
     },
 
