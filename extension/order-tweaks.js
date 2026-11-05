@@ -117,7 +117,16 @@
       if (Array.from(current.selectedOptions).some(option => option.value && !['0', '-1'].includes(option.value))) return;
       const active = document.activeElement;
       if (active !== document.body && active !== previousFocus && !box.contains(active)) return;
-      box.querySelector('.select2-search__field')?.focus({ preventScroll: true });
+      // 聚焦搜索框的同时显式打开下拉列表，否则 Select2 在 dropdown 未打开时会忽略
+      // input 事件，导致叉掉游戏后立即键入的文字不触发检索。
+      const searchField = box.querySelector('.select2-search__field');
+      if (!searchField) return;
+      const $current = root.jQuery?.(current);
+      const s2 = $current?.data('select2');
+      if (s2 && !s2.isOpen()) {
+        $current.trigger('select2:open');
+      }
+      searchField.focus({ preventScroll: true });
     }, 0);
   }, true);
 
