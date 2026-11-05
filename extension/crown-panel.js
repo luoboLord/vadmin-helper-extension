@@ -232,8 +232,9 @@
     main.replaceChildren(); sub.textContent = sub.title = '';
     panel.classList.remove('collapsed'); fold.textContent = '收起';
   }
-  document.addEventListener('change', syncSelection, true);
-  document.addEventListener('input', syncSelection, true);
+  const onGameInput = event => { if (event.target?.id === 'form_gid') syncSelection(); };
+  document.addEventListener('change', onGameInput, true);
+  document.addEventListener('input', onGameInput, true);
   document.addEventListener('reset', () => setTimeout(syncSelection, 0), true);
   document.addEventListener('visibilitychange', syncSelection);
   window.addEventListener('pageshow', syncSelection);

@@ -173,12 +173,16 @@
     }
     const selection = core.supportedPath(location.pathname) ? core.readSelection(select) : null;
     const key = selection ? JSON.stringify(selection) : '';
-    if (!selection) { host.style.display = 'none'; main.replaceChildren(); lastKey = ''; return; }
+    if (!selection) {
+      if (host.style.display !== 'none') { host.style.display = 'none'; main.replaceChildren(); }
+      lastKey = ''; return;
+    }
     if (key === lastKey) return;
     lastKey = key; render(selection);
   }
-  document.addEventListener('change', sync, true);
-  document.addEventListener('input', sync, true);
+  const onGameInput = event => { if (event.target?.id === 'form_gid') sync(); };
+  document.addEventListener('change', onGameInput, true);
+  document.addEventListener('input', onGameInput, true);
   document.addEventListener('reset', () => setTimeout(sync, 0), true);
   document.addEventListener('visibilitychange', sync);
   window.addEventListener('pageshow', sync);

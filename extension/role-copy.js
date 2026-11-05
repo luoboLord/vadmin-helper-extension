@@ -90,8 +90,9 @@
     return {roleId: row.children[cols.roleId]?.textContent, roleName: row.children[cols.roleName]?.textContent,
       serverName: server(row.children[cols.server]?.textContent, playerPage)};
   }
+  let table = document.getElementById('list_table');
   function refresh() {
-    const table = document.querySelector('#list_table');
+    table = document.getElementById('list_table');
     if (!table) return;
     const cols = columns(table);
     if (!cols) { for (const target of table.querySelectorAll('[data-work-tool-role-copy]')) unbindName(target); return; }
@@ -106,6 +107,9 @@
   }
   let pending = false;
   const schedule = () => { if (!pending) { pending = true; requestAnimationFrame(() => { pending = false; refresh(); }); } };
-  new MutationObserver(schedule).observe(document.documentElement, {subtree: true, childList: true, characterData: true});
+  new MutationObserver(records => {
+    if (table !== document.getElementById('list_table') ||
+        (table && records.some(record => table.contains(record.target)))) schedule();
+  }).observe(document.documentElement, {subtree: true, childList: true, characterData: true});
   refresh();
 })(globalThis);

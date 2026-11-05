@@ -14,6 +14,113 @@
   if (typeof module !== 'undefined' && module.exports) { module.exports = { nextRange }; return; }
   if (!/^\/order\/ls\/?$/.test(location.pathname)) return;
 
+  const enhancedPickers = new WeakSet();
+  function enhanceGamePicker() {
+    const select = document.getElementById('form_gid');
+    const $ = root.jQuery;
+    const picker = $ && select?.multiple && $(select).data('select2');
+    const search = picker?.selection?.$search?.[0];
+    if (!search || enhancedPickers.has(picker)) return;
+    enhancedPickers.add(picker);
+
+    // 拼音组词期间保留浏览器输入法行为，等上屏后再让 Select2 处理 input。
+    let composing = false;
+    let commitTimer;
+    search.addEventListener('compositionstart', () => {
+      clearTimeout(commitTimer);
+      commitTimer = undefined;
+      composing = true;
+    });
+    search.addEventListener('compositionend', () => {
+      composing = false;
+      // 有些输入法在 compositionend 之前发送最后一个 input，需要补查一次。
+      commitTimer = setTimeout(() => {
+        commitTimer = undefined;
+        if (document.activeElement === search) search.dispatchEvent(new Event('input', { bubbles: true }));
+      }, 0);
+    });
+    search.addEventListener('input', event => {
+      if (composing || event.isComposing) { event.stopPropagation(); return; }
+      clearTimeout(commitTimer);
+      commitTimer = undefined;
+    });
+    for (const type of ['keydown', 'keyup']) {
+      search.addEventListener(type, event => {
+        if (composing || event.isComposing || event.keyCode === 229 ||
+            (type === 'keyup' && commitTimer !== undefined)) event.stopPropagation();
+      });
+    }
+
+    // 本地结果按原顺序分批渲染。继续滚动能看到全部选项，远程下拉沿用自身分页。
+    const results = picker.results;
+    const list = results?.$results?.[0];
+    if (!list || typeof results.sort !== 'function' || typeof results.clear !== 'function' ||
+        !picker.options?.get || picker.options.get('ajax')) return;
+    const pageSize = 80;
+    const sort = results.sort;
+    const clear = results.clear;
+    let pending;
+    let offset;
+    let appending = false;
+    results.sort = function (items) {
+      if (appending) return items;
+      const sorted = sort.call(this, items);
+      pending = sorted.length > pageSize && sorted.every(item => !item.children) ? sorted : undefined;
+      offset = pageSize;
+      return pending ? sorted.slice(0, offset) : sorted;
+    };
+    results.clear = function () {
+      pending = undefined;
+      clear.call(this);
+    };
+    picker.on('close', () => { pending = undefined; });
+    function appendPage() {
+      if (!pending || !picker.isOpen()) return;
+      const items = pending.slice(offset, offset + pageSize);
+      offset += items.length;
+      if (offset >= pending.length) pending = undefined;
+      appending = true;
+      try { picker.trigger('results:append', { data: { results: items } }); }
+      finally { appending = false; }
+    }
+    list.addEventListener('scroll', () => {
+      if (pending && list.scrollHeight - list.scrollTop - list.clientHeight < 48) appendPage();
+    }, { passive: true });
+    // 如果自定义模板隐藏了前一批候选，补到列表可滚动或结果已全部显示。
+    picker.on('results:all', () => {
+      while (pending && picker.isOpen() && list.scrollHeight <= list.clientHeight) appendPage();
+    });
+  }
+  enhanceGamePicker();
+  // 后台重建控件时，在 Select2 处理点击或聚焦前接入新实例。
+  for (const type of ['pointerdown', 'focusin']) {
+    document.addEventListener(type, event => {
+      const box = event.target.closest?.('.select2-container');
+      if (box?.previousElementSibling?.id === 'form_gid') enhanceGamePicker();
+    }, true);
+  }
+
+  // Select2 在 mousedown 清空并重绘选择区。等本次联动结束，再聚焦当前的搜索框。
+  document.addEventListener('mousedown', event => {
+    if (event.button !== 0 || !(event.target instanceof Element)) return;
+    const clear = event.target.closest('.select2-selection__clear');
+    if (!clear) return;
+    const select = document.getElementById('form_gid');
+    const container = select?.nextElementSibling;
+    if (!select?.multiple || select.disabled || !select.value ||
+        !container?.matches('.select2-container') || !container.contains(clear)) return;
+    const previousFocus = document.activeElement;
+    setTimeout(() => {
+      const current = document.getElementById('form_gid');
+      const box = current?.nextElementSibling;
+      if (!current?.multiple || current.disabled || !box?.matches('.select2-container')) return;
+      if (Array.from(current.selectedOptions).some(option => option.value && !['0', '-1'].includes(option.value))) return;
+      const active = document.activeElement;
+      if (active !== document.body && active !== previousFocus && !box.contains(active)) return;
+      box.querySelector('.select2-search__field')?.focus({ preventScroll: true });
+    }, 0);
+  }, true);
+
   // 复用查询按钮，保留页面原有的校验和查询逻辑，避免原生表单重复提交。
   document.addEventListener('keydown', event => {
     if (event.key !== 'Enter' || event.isComposing || event.keyCode === 229 ||

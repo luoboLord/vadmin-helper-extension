@@ -26,9 +26,10 @@
     const capture = () => { for (const field of fields()) remember(field); };
     function write(field, value) {
       if (field.tagName === 'SELECT') {
-        const values = Array.isArray(value) ? value : [String(value)];
-        if (!values.every(v => [...field.options].some(o => o.value === v))) return;
         if (JSON.stringify(read(field)) === JSON.stringify(value)) return;
+        const values = Array.isArray(value) ? value : [String(value)];
+        const options = Array.from(field.options);
+        if (!values.every(v => options.some(o => o.value === v))) return;
         if (field.multiple) for (const option of field.options) option.selected = values.includes(option.value);
         else field.value = String(value);
         // 只更新Select2显示，不触发后台的change清空/联动查询逻辑。
@@ -72,7 +73,13 @@
       if (event.target === select || (container?.classList?.contains('select2-container') && container.contains(event.target))) capture();
     };
     doc.addEventListener('pointerdown', beforeGameGesture, true);
-    doc.addEventListener('keydown', beforeGameGesture, true);
+    doc.addEventListener('keydown', event => {
+      // 搜索文字和候选导航不改游戏。保留可能提交或清除选择的按键兜底。
+      if (event.isComposing || event.keyCode === 229) return;
+      if (['Enter', 'Tab', 'Escape'].includes(event.key) ||
+          (['Backspace', 'Delete'].includes(event.key) && !event.target?.value) ||
+          (event.key === ' ' && (event.ctrlKey || !event.target?.matches?.('input, textarea')))) beforeGameGesture(event);
+    }, true);
     doc.addEventListener('reset', event => {
       const owned = fields().filter(field => event.target?.contains?.(field));
       for (const field of owned) {
