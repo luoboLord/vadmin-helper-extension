@@ -15,64 +15,16 @@
   if (!/^\/(?:order\/ls|game\/playerinfo)\/?$/.test(location.pathname)) return;
 
   const select2For = select => select && root.jQuery?.(select).data('select2');
-  const searchOf = picker => picker?.selection?.$search?.[0] || picker?.dropdown?.$search?.[0];
   const enhancedPickers = new WeakSet();
   function enhanceGamePicker() {
     const picker = select2For(document.getElementById('form_gid'));
-    const search = searchOf(picker);
-    if (!search || enhancedPickers.has(picker)) return;
-    enhancedPickers.add(picker);
-
-    // 拼音组词期间保留输入法行为，确认后优先让 Select2 处理 input。
-    let composing = false;
-    let searchTimer;
-    let lastQuery;
-    picker.on('query', ({ term = '' }) => { lastQuery = term; });
-    function cancelSearchCheck() {
-      clearTimeout(searchTimer);
-      searchTimer = undefined;
-    }
-    picker.on('close', () => {
-      cancelSearchCheck();
-      composing = false;
-      lastQuery = undefined;
-    });
-    function checkSearchAfterInput() {
-      cancelSearchCheck();
-      // 等原生 input 处理完。清空后 Select2 可能跳过首个 input，候选仍是空词的结果。
-      searchTimer = setTimeout(() => {
-        searchTimer = undefined;
-        if (composing || document.activeElement !== search || searchOf(picker) !== search || picker.isDisabled()) return;
-        const term = search.value;
-        if (term !== lastQuery) picker.trigger('query', { term });
-      }, 0);
-    }
-    search.addEventListener('compositionstart', () => {
-      cancelSearchCheck();
-      composing = true;
-    });
-    search.addEventListener('compositionend', () => {
-      composing = false;
-      // 有些输入法在 compositionend 之前就发送了最后一个 input。
-      checkSearchAfterInput();
-    });
-    search.addEventListener('input', event => {
-      if (event.isComposing ?? composing) { event.stopImmediatePropagation(); return; }
-      composing = false;
-      checkSearchAfterInput();
-    }, true);
-    for (const type of ['keydown', 'keyup']) {
-      search.addEventListener(type, event => {
-        if (composing || event.isComposing || event.keyCode === 229 ||
-            (type === 'keyup' && searchTimer !== undefined)) event.stopImmediatePropagation();
-      }, true);
-    }
-
+    if (!picker || enhancedPickers.has(picker)) return;
     // 本地结果按原顺序分批渲染。继续滚动能看到全部选项，远程下拉沿用自身分页。
     const results = picker.results;
     const list = results?.$results?.[0];
     if (!list || typeof results.sort !== 'function' || typeof results.clear !== 'function' ||
         !picker.options?.get || picker.options.get('ajax')) return;
+    enhancedPickers.add(picker);
     const pageSize = 80;
     const sort = results.sort;
     const clear = results.clear;
@@ -116,31 +68,6 @@
       if (box?.previousElementSibling?.id === 'form_gid') enhanceGamePicker();
     }, true);
   }
-
-  // Select2 在 mousedown 清空并重绘选择区。等本次联动结束，再聚焦当前的搜索框。
-  document.addEventListener('mousedown', event => {
-    if (event.button !== 0 || !(event.target instanceof Element)) return;
-    const clear = event.target.closest('.select2-selection__clear');
-    if (!clear) return;
-    const select = document.getElementById('form_gid');
-    const container = select?.nextElementSibling;
-    if (!select || select.disabled || !select.value ||
-        !container?.matches('.select2-container') || !container.contains(clear)) return;
-    const previousFocus = document.activeElement;
-    setTimeout(() => {
-      const current = document.getElementById('form_gid');
-      const box = current?.nextElementSibling;
-      if (!current || current.disabled || !box?.matches('.select2-container')) return;
-      if (Array.from(current.selectedOptions).some(option => option.value && !['0', '-1'].includes(option.value))) return;
-      const active = document.activeElement;
-      if (active !== document.body && active !== previousFocus && !box.contains(active)) return;
-      // 单选框的搜索输入在下拉层内，打开后才可聚焦。
-      enhanceGamePicker();
-      const picker = select2For(current);
-      if (picker && !picker.isOpen()) picker.open();
-      (searchOf(picker) || box.querySelector('.select2-search__field'))?.focus({ preventScroll: true });
-    }, 0);
-  }, true);
 
   if (!/^\/order\/ls\/?$/.test(location.pathname)) return;
 
