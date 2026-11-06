@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "客服链接助手 · 游戏联动",
-  "version": "1.12.12",
+  "version": "1.12.13",
   "description": "跟随已选游戏显示链接，同步飞书链接库；可对比客服资料大全并确认后自动新增缺少的链接。保留订单筛选、查冠名权和网页标签复用；玩家日志支持流式导出CSV。",
   "minimum_chrome_version": "121",
   "permissions": [
@@ -48,7 +48,8 @@
         "https://vadmin.648sy.com/game/playerinfo*"
       ],
       "js": [
-        "filter-drafts.js"
+        "filter-drafts.js",
+        "order-tweaks.js"
       ],
       "run_at": "document_idle",
       "world": "MAIN"
@@ -69,14 +70,10 @@
       "matches": [
         "https://vadmin.648sy.com/order/ls*"
       ],
-      "js": [
-        "order-tweaks.js"
-      ],
       "css": [
         "order-tweaks.css"
       ],
-      "run_at": "document_idle",
-      "world": "MAIN"
+      "run_at": "document_idle"
     },
     {
       "matches": [

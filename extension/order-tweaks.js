@@ -12,14 +12,14 @@
     return { start, end };
   }
   if (typeof module !== 'undefined' && module.exports) { module.exports = { nextRange }; return; }
-  if (!/^\/order\/ls\/?$/.test(location.pathname)) return;
+  if (!/^\/(?:order\/ls|game\/playerinfo)\/?$/.test(location.pathname)) return;
 
+  const select2For = select => select && root.jQuery?.(select).data('select2');
+  const searchOf = picker => picker?.selection?.$search?.[0] || picker?.dropdown?.$search?.[0];
   const enhancedPickers = new WeakSet();
   function enhanceGamePicker() {
-    const select = document.getElementById('form_gid');
-    const $ = root.jQuery;
-    const picker = $ && select?.multiple && $(select).data('select2');
-    const search = picker?.selection?.$search?.[0];
+    const picker = select2For(document.getElementById('form_gid'));
+    const search = searchOf(picker);
     if (!search || enhancedPickers.has(picker)) return;
     enhancedPickers.add(picker);
 
@@ -40,15 +40,15 @@
       }, 0);
     });
     search.addEventListener('input', event => {
-      if (composing || event.isComposing) { event.stopPropagation(); return; }
+      if (composing || event.isComposing) { event.stopImmediatePropagation(); return; }
       clearTimeout(commitTimer);
       commitTimer = undefined;
-    });
+    }, true);
     for (const type of ['keydown', 'keyup']) {
       search.addEventListener(type, event => {
         if (composing || event.isComposing || event.keyCode === 229 ||
-            (type === 'keyup' && commitTimer !== undefined)) event.stopPropagation();
-      });
+            (type === 'keyup' && commitTimer !== undefined)) event.stopImmediatePropagation();
+      }, true);
     }
 
     // 本地结果按原顺序分批渲染。继续滚动能看到全部选项，远程下拉沿用自身分页。
@@ -107,28 +107,25 @@
     if (!clear) return;
     const select = document.getElementById('form_gid');
     const container = select?.nextElementSibling;
-    if (!select?.multiple || select.disabled || !select.value ||
+    if (!select || select.disabled || !select.value ||
         !container?.matches('.select2-container') || !container.contains(clear)) return;
     const previousFocus = document.activeElement;
     setTimeout(() => {
       const current = document.getElementById('form_gid');
       const box = current?.nextElementSibling;
-      if (!current?.multiple || current.disabled || !box?.matches('.select2-container')) return;
+      if (!current || current.disabled || !box?.matches('.select2-container')) return;
       if (Array.from(current.selectedOptions).some(option => option.value && !['0', '-1'].includes(option.value))) return;
       const active = document.activeElement;
       if (active !== document.body && active !== previousFocus && !box.contains(active)) return;
-      // 聚焦搜索框的同时显式打开下拉列表，否则 Select2 在 dropdown 未打开时会忽略
-      // input 事件，导致叉掉游戏后立即键入的文字不触发检索。
-      const searchField = box.querySelector('.select2-search__field');
-      if (!searchField) return;
-      const $current = root.jQuery?.(current);
-      const s2 = $current?.data('select2');
-      if (s2 && !s2.isOpen()) {
-        $current.trigger('select2:open');
-      }
-      searchField.focus({ preventScroll: true });
+      // 单选框的搜索输入在下拉层内，打开后才可聚焦。
+      enhanceGamePicker();
+      const picker = select2For(current);
+      if (picker && !picker.isOpen()) picker.open();
+      (searchOf(picker) || box.querySelector('.select2-search__field'))?.focus({ preventScroll: true });
     }, 0);
   }, true);
+
+  if (!/^\/order\/ls\/?$/.test(location.pathname)) return;
 
   // 复用查询按钮，保留页面原有的校验和查询逻辑，避免原生表单重复提交。
   document.addEventListener('keydown', event => {
