@@ -23,31 +23,48 @@
     if (!search || enhancedPickers.has(picker)) return;
     enhancedPickers.add(picker);
 
-    // 拼音组词期间保留浏览器输入法行为，等上屏后再让 Select2 处理 input。
+    // 拼音组词期间保留输入法行为，确认后优先让 Select2 处理 input。
     let composing = false;
-    let commitTimer;
+    let searchTimer;
+    let lastQuery;
+    picker.on('query', ({ term = '' }) => { lastQuery = term; });
+    function cancelSearchCheck() {
+      clearTimeout(searchTimer);
+      searchTimer = undefined;
+    }
+    picker.on('close', () => {
+      cancelSearchCheck();
+      composing = false;
+      lastQuery = undefined;
+    });
+    function checkSearchAfterInput() {
+      cancelSearchCheck();
+      // 等原生 input 处理完。清空后 Select2 可能跳过首个 input，候选仍是空词的结果。
+      searchTimer = setTimeout(() => {
+        searchTimer = undefined;
+        if (composing || document.activeElement !== search || searchOf(picker) !== search || picker.isDisabled()) return;
+        const term = search.value;
+        if (term !== lastQuery) picker.trigger('query', { term });
+      }, 0);
+    }
     search.addEventListener('compositionstart', () => {
-      clearTimeout(commitTimer);
-      commitTimer = undefined;
+      cancelSearchCheck();
       composing = true;
     });
     search.addEventListener('compositionend', () => {
       composing = false;
-      // 有些输入法在 compositionend 之前发送最后一个 input，需要补查一次。
-      commitTimer = setTimeout(() => {
-        commitTimer = undefined;
-        if (document.activeElement === search) search.dispatchEvent(new Event('input', { bubbles: true }));
-      }, 0);
+      // 有些输入法在 compositionend 之前就发送了最后一个 input。
+      checkSearchAfterInput();
     });
     search.addEventListener('input', event => {
-      if (composing || event.isComposing) { event.stopImmediatePropagation(); return; }
-      clearTimeout(commitTimer);
-      commitTimer = undefined;
+      if (event.isComposing ?? composing) { event.stopImmediatePropagation(); return; }
+      composing = false;
+      checkSearchAfterInput();
     }, true);
     for (const type of ['keydown', 'keyup']) {
       search.addEventListener(type, event => {
         if (composing || event.isComposing || event.keyCode === 229 ||
-            (type === 'keyup' && commitTimer !== undefined)) event.stopImmediatePropagation();
+            (type === 'keyup' && searchTimer !== undefined)) event.stopImmediatePropagation();
       }, true);
     }
 
