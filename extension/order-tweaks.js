@@ -16,15 +16,53 @@
 
   const select2For = select => select && root.jQuery?.(select).data('select2');
   const enhancedPickers = new WeakSet();
+  function waitForChineseInput(picker, search) {
+    let composing = false;
+    let deferred = false;
+    let commitTimer;
+    const trigger = picker.trigger;
+    picker.trigger = function (type, params) {
+      if (type === 'query' && params?.term != null) {
+        if (composing) { deferred = true; return; }
+        clearTimeout(commitTimer);
+        deferred = false;
+      }
+      return trigger.apply(this, arguments);
+    };
+    function reset() {
+      clearTimeout(commitTimer);
+      composing = false;
+      deferred = false;
+    }
+    function finish() {
+      composing = false;
+      if (!deferred) return;
+      // 让上屏后的原生 input 优先检索。若最后一次 input 先于 compositionend，则补发已上屏的词。
+      clearTimeout(commitTimer);
+      commitTimer = setTimeout(() => {
+        if (document.activeElement === search && !picker.isDisabled()) picker.trigger('query', { term: search.value });
+        else deferred = false;
+      }, 0);
+    }
+    search.addEventListener('compositionstart', () => { reset(); composing = true; });
+    search.addEventListener('compositionend', finish);
+    search.addEventListener('input', event => {
+      if (composing && event.isComposing === false) finish();
+    }, true);
+    picker.on('close', reset);
+  }
   function enhanceGamePicker() {
     const picker = select2For(document.getElementById('form_gid'));
     if (!picker || enhancedPickers.has(picker)) return;
+    enhancedPickers.add(picker);
+    const search = picker.selection?.$search?.[0] || picker.dropdown?.$search?.[0];
+    if (search) waitForChineseInput(picker, search);
+
     // 本地结果按原顺序分批渲染。继续滚动能看到全部选项，远程下拉沿用自身分页。
     const results = picker.results;
     const list = results?.$results?.[0];
     if (!list || typeof results.sort !== 'function' || typeof results.clear !== 'function' ||
         !picker.options?.get || picker.options.get('ajax')) return;
-    enhancedPickers.add(picker);
     const pageSize = 80;
     const sort = results.sort;
     const clear = results.clear;
