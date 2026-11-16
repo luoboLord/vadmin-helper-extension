@@ -2,12 +2,24 @@
   'use strict';
   // 飞书页面写入通道：新增单条记录，或整格覆盖一条已有记录的若干格子。
   // CSRF 只在页面内临时读取，不返回、不保存；载荷不含任何认证信息。
-  const ALPHABET='abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  // 飞书 recordV2：reczz + 11 位 Base62（0-9/A-Z/a-z），编码毫秒时间与六位随机部分。
+  // 不能把 rec 后的 13 位完全随机生成；服务端会以 invalid_prefix 拒绝新增。
+  const ALPHABET='0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+  const isNewRecordId=id=>/^reczz[A-Za-z0-9]{11}$/.test(id||'');
+  // 修改时保留已有 ID；兼容原生旧版 14 位 ID，以及历史任务里的 16 位 ID。
+  const isRecordId=id=>/^rec(?:[A-Za-z0-9]{11}|[A-Za-z0-9]{13})$/.test(id||'');
+  let lastTimestamp=0n;
   const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   function recordId(){
-    const out=[];
-    while(out.length<13)for(const b of crypto.getRandomValues(new Uint8Array(16)))if(b<248&&out.length<13)out.push(ALPHABET[b%62]);
-    return 'rec'+out.join('');
+    let random;
+    do{random=crypto.getRandomValues(new Uint32Array(1))[0];}while(random>=4294000000);
+    let timestamp=BigInt(Date.now())*1000000n+BigInt(random%1000000);
+    // 同毫秒连续生成时也不能重号；重试仍复用已经持久化的 ID，不会再调用生成器。
+    if(timestamp<=lastTimestamp)timestamp=lastTimestamp+1n;
+    lastTimestamp=timestamp;
+    let encoded='';
+    do{encoded=ALPHABET[Number(timestamp%62n)]+encoded;timestamp/=62n;}while(timestamp);
+    return 'reczz'+encoded.padStart(11,'0');
   }
   async function gzip64(text){
     const buf=await new Response(new Blob([new TextEncoder().encode(text)]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer();
@@ -20,7 +32,7 @@
   // 完整请求载荷在提交前持久化；恢复时原样重发，由 signature 和 recordId 两层去重。
   // set：整格覆盖已有记录的若干格子；否则新增一条记录。
   async function payload({base,tableId,recordId:id,cells,rev,rank,member,signature,set=false}){
-    if(!/^[A-Za-z0-9]+$/.test(base)||!/^tbl[A-Za-z0-9]+$/.test(tableId)||!/^rec[A-Za-z0-9]{13}$/.test(id))throw Error('写入目标无效');
+    if(!/^[A-Za-z0-9]+$/.test(base)||!/^tbl[A-Za-z0-9]+$/.test(tableId)||!(set?isRecordId(id):isNewRecordId(id)))throw Error('写入目标无效');
     const entries=Object.entries(cells||{});
     if(!entries.length||entries.some(([fid,c])=>!/^fld[A-Za-z0-9]+$/.test(fid)||!validCell(c)))throw Error('写入内容无效');
     const data={cellData:cells};if(rank)data.tableRank=rank;
@@ -40,7 +52,8 @@
       const a=ops?.[0]?.actions?.[0];
       const add=ops?.[0]?.command==='AddRecordV2'&&a?.action==='data.addRecordV2'&&a.data?.cellData&&typeof a.data.cellData==='object';
       const set=ops?.[0]?.command==='SetRecord'&&a?.action==='data.setRecord'&&a.data&&typeof a.data==='object'&&Object.keys(a.data).length>0;
-      if(!Array.isArray(ops)||ops.length!==1||!(add||set)||ops[0].actions.length!==1||a.tableId!==d.token||!/^rec[A-Za-z0-9]{13}$/.test(a.recordId||''))return {error:'operation'};
+      const validId=add?/^reczz[A-Za-z0-9]{11}$/.test(a.recordId||''):/^rec(?:[A-Za-z0-9]{11}|[A-Za-z0-9]{13})$/.test(a?.recordId||'');
+      if(!Array.isArray(ops)||ops.length!==1||!(add||set)||ops[0].actions.length!==1||a.tableId!==d.token||!validId)return {error:'operation'};
       const csrf=decodeURIComponent((document.cookie.match(/(?:^|;\s*)_csrf_token=([^;]+)/)||[])[1]||'');
       if(!csrf)return {csrf:true};
       let response;
@@ -64,7 +77,10 @@
     if(r.status!==200)return {kind:'pause',reason:'http',message:'飞书拒绝写入（HTTP '+r.status+'），请检查编辑权限'};
     if(r.code!=null&&r.code!==0)return {kind:'pause',reason:'permission',message:'飞书拒绝写入（'+r.code+(r.msg?' '+r.msg:'')+'），请检查编辑权限'};
     if(r.dataType==='ACCEPT_COMMIT')return {kind:'accepted',rev:r.rev};
-    if(r.dataType==='ERROR')return {kind:'error',message:'飞书返回错误 '+r.dataCode+(r.dataMsg?' '+r.dataMsg:'')};
+    if(r.dataType==='ERROR'){
+      if(r.dataCode===4199&&/invalid RecordID format/i.test(r.dataMsg||''))return {kind:'error',message:'扩展生成的新增记录编号被飞书拒绝，请更新扩展后重新对比并确认写入；本次未新增该记录。\n飞书返回错误 '+r.dataCode+(r.dataMsg?' '+r.dataMsg:'')};
+      return {kind:'error',message:'飞书返回错误 '+r.dataCode+(r.dataMsg?' '+r.dataMsg:'')};
+    }
     return {kind:'unknown',message:'飞书返回无法识别的结果'};
   }
   // 选用同域名已打开的飞书标签；没有时在后台新开一个，任务结束后关闭。
@@ -99,6 +115,6 @@
     async function close(){const id=tabId;tabId=null;const created=id!=null&&id===createdTabId;createdTabId=null;if(created)await chrome.tabs.remove(id).catch(()=>{});}
     return {acquire,send,close};
   }
-  const api={recordId,gzip64,payload,pageSend,classify,channel};
+  const api={recordId,isNewRecordId,gzip64,payload,pageSend,classify,channel};
   root.WorkToolFeishuWrite=api;if(typeof module!=='undefined'&&module.exports)module.exports=api;
 })(globalThis);

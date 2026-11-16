@@ -181,6 +181,8 @@
             if(r.skip){op.state='skipped';op.error=r.skip;await save(job);return;}
           }else if(t.ids.length+1>Y.LIMIT)return pause('capacity','“'+t.name+'”已达到 '+Y.LIMIT+' 条上限，任务已暂停');
           let cells;try{cells=Y.cells(op.values,t.table.fieldMap,{blank:op.kind==='set'});}catch(e){return pause('schema',e.message);}
+          // 升级前生成但尚未提交的预览可换用新格式；已提交或结果未知的请求绝不换 ID。
+          if(op.kind==='add'&&!W.isNewRecordId(op.recordId))op.recordId=W.recordId();
           op.signature=crypto.randomUUID();
           op.payload=await W.payload({base:job.target.base,tableId:t.id,recordId:op.recordId,cells,rev:t.table.latestCSRev,rank:op.kind==='add'?t.table.rankInfo?.nextRank:undefined,member:job.member,signature:op.signature,set:op.kind==='set'});
           op.state='prepared';await save(job);
