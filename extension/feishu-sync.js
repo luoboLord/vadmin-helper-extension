@@ -17,6 +17,8 @@
   }
   const scopeKey=s=>s.shared?'*':s.keys.join('/');
   const union=(a,b)=>a.shared||b.shared?{shared:true,keys:[]}:{shared:false,keys:[...new Set([...a.keys,...b.keys])].sort()};
+  // 两个专服范围是否有交集：共用范围覆盖所有专服。
+  const overlaps=(a,b)=>a.shared||b.shared||a.keys.some(k=>b.keys.includes(k));
   // 单元格语义：每行“名称 | 网址 | 备注”解析后比较，忽略顺序、空白和网址编码差异。
   function entriesOf(field,text){
     return clean(text).split(/\r?\n/).map(clean).filter(Boolean).map(l=>{
@@ -41,7 +43,9 @@
       else if(category==='备注'&&part(name))item={field:'游戏备注',name:part(name),url:'',note:'',match:'n'+norm(part(name))};
       else return;
       const at=sheet.origins?.[i],origin=item.field+' / '+item.name+(at?'：原表 '+colName(at.col)+at.row:'');
-      const prev=g.items.find(x=>x.field===item.field&&x.match===item.match),s=scope(server);
+      // 名称或备注不同（例如同一网址在各专服有各自的账号备注）时不合并，否则会丢掉其中一个专服的说明。
+      const sameItem=x=>x.field===item.field&&x.match===item.match&&norm(x.name)===norm(item.name)&&urlKey(x.url)===urlKey(item.url)&&norm(x.note)===norm(item.note);
+      const prev=g.items.find(sameItem),s=scope(server);
       if(prev){prev.scope=union(prev.scope,s);if(!prev.origins.includes(origin))prev.origins.push(origin);return;}
       g.items.push({...item,scope:s,origins:[origin]});
     });
@@ -72,14 +76,27 @@
   function changes(before,after){
     const list=rows=>rows.flatMap(({row})=>FIELDS.flatMap(f=>entriesOf(f,row[f]).map(e=>({...e,field:f,scope:scope(row['专服']),server:clean(row['专服'])}))));
     const a=list(before),b=list(after),out={added:[],removed:[],servers:[],edited:[]};
+    // 同一条目（同栏目+同网址/备注+同内容签名）在新数据中的全部条目，用于比较专服覆盖总范围。
+    const sigEntries=e=>b.filter(x=>x.field===e.field&&x.match===e.match&&x.sig===e.sig);
     for(const e of b){
       const olds=a.filter(x=>x.field===e.field&&x.match===e.match);
       if(!olds.length){out.added.push(e.field+'：'+e.text+(e.server?'（'+e.server+'）':''));continue;}
-      const was=olds.map(x=>x.scope).reduce(union);
-      if(scopeKey(was)!==scopeKey(e.scope))out.servers.push(e.field+'：'+e.text.split('|')[0].trim()+'　'+([...new Set(olds.map(x=>x.server))].join(' + ')||'共用')+' → '+(e.server||'共用'));
-      else if(!olds.some(x=>x.sig===e.sig))out.edited.push(e.field+'：'+olds[0].text+' → '+e.text);
+      const sameScope=olds.filter(x=>scopeKey(x.scope)===scopeKey(e.scope)),sameSig=olds.filter(x=>x.sig===e.sig);
+      // 同一范围内已有完全相同的条目：名称/备注不同的同网址条目不会误报“专服变化”；
+      // 但同一内容在旧数据中覆盖多个专服（例如两行同网址分属渠道1/渠道2）时，要比较覆盖总范围，
+      // 范围缩小（旧并集 ≠ 新并集）不能直接跳过，否则实际会把渠道2行标待核对却不提示。
+      if(sameScope.some(x=>x.sig===e.sig)){
+        const wasScope=sameSig.map(x=>x.scope).reduce(union);
+        const nowScope=sigEntries(e).map(x=>x.scope).reduce(union);
+        if(scopeKey(wasScope)===scopeKey(nowScope))continue;
+      }
+      // 专服和内容分别判断，两者同时变化时都要显示；内容修改优先对照同专服范围的旧条目。
+      const relevant=sameSig.length?sameSig:sameScope.length?sameScope:olds;
+      const was=relevant.map(x=>x.scope).reduce(union);
+      if(scopeKey(was)!==scopeKey(e.scope))out.servers.push(e.field+'：'+e.text.split('|')[0].trim()+'　'+([...new Set(relevant.map(x=>x.server||'共用'))].join(' + ')||'共用')+' → '+([...new Set(sigEntries(e).map(x=>x.server||'共用'))].join(' + ')||'共用'));
+      if(!sameSig.length)out.edited.push(e.field+'：'+(sameScope[0]||olds[0]).text+' → '+e.text);
     }
-    for(const e of a)if(!b.some(x=>x.field===e.field&&x.match===e.match))out.removed.push(e.field+'：'+e.text+(e.server?'（'+e.server+'）':''));
+    for(const e of a)if(!b.some(x=>x.field===e.field&&x.match===e.match&&overlaps(e.scope,x.scope)))out.removed.push(e.field+'：'+e.text+(e.server?'（'+e.server+'）':''));
     for(const k of Object.keys(out))out[k]=[...new Set(out[k])];
     return out;
   }
@@ -130,14 +147,14 @@
         for(const [f,v]of [['完整名称',g.full],['游戏',g.game],['版本',g.version]])if(clean(config.row[f])!==v){values[f]=v;old[f]=clean(config.row[f]);}
         if(Object.keys(values).length)gameOps.push(...addOp({kind:'set',table:'settings',recordId:config.id,values,old}));
       }
-      const deps=[...gameOps];if(!existing.length)nextOrder+=10;
+      const deps=[...gameOps],mergedDeps=[];if(!existing.length)nextOrder+=10;
       for(const t of target){
         const pair=pairs.find(p=>p[0]===t);
         if(!pair){
           const order=existing.map(e=>Number(clean(e.row['排序']))).filter(n=>Number.isFinite(n)&&n>0);
           const values={...t.values,'记录类型':'游戏链接','状态':'启用','排序':String(order.length?Math.max(...order):nextOrder)};
           if(has('来源'))values['来源']=sourceText(t);
-          gameOps.push(...addOp({kind:'add',table:'library',values,dependsOn:deps}));continue;
+          const ids=addOp({kind:'add',table:'library',values,dependsOn:deps});gameOps.push(...ids);mergedDeps.push(...ids);continue;
         }
         const e=pair[1],values={},old={};
         if(norm(e.row['完整名称'])!==norm(full))values['完整名称']=full;
@@ -146,10 +163,11 @@
         if(!Object.keys(values).length)continue;
         if(has('来源'))values['来源']=sourceText(t);
         for(const f of Object.keys(values))old[f]=clean(e.row[f]);
-        gameOps.push(...addOp({kind:'set',table:'library',recordId:e.id,values,old,dependsOn:deps}));
+        const ids=addOp({kind:'set',table:'library',recordId:e.id,values,old,dependsOn:deps});gameOps.push(...ids);mergedDeps.push(...ids);
       }
       const extra=existing.filter(e=>!used.has(e.id));
-      for(const e of extra)gameOps.push(...addOp(retire(e,tag+'：内容已合并到其他行或原表已没有，确认后可删除本行',has)));
+      // 合并内容的目标行全部核实成功后才标待核对，目标行写入失败时源行保持启用。
+      for(const e of extra)gameOps.push(...addOp(retire(e,tag+'：内容已合并到其他行或原表已没有，确认后可删除本行',has,mergedDeps)));
       if(!gameOps.length)continue;
       const after=[...pairs.map(([t])=>({row:t.values})),...target.filter(t=>!pairs.some(p=>p[0]===t)).map(t=>({row:t.values}))];
       games.push({key:g.nf,full:g.full,from:from?libGames.get(from):'',kind:from?'rename':existing.length?'update':'new',
@@ -163,15 +181,15 @@
     const pub=publicItems(sheet),pubRows=library.rows.map((row,i)=>({id:library.ids[i],row})).filter(({row})=>isActive(row)&&typeOf(row)==='公共链接');
     const pubText=pub.map(x=>line(x.name,x.url,'')).join('\n');
     if(pub.length){
-      const gameOps=[],[first,...rest]=pubRows;
-      if(!first){const values={'记录类型':'公共链接','状态':'启用','其他':pubText};if(has('来源'))values['来源']=tag+'\n公共链接：原表第 1 行';gameOps.push(...addOp({kind:'add',table:'library',values}));}
+      const gameOps=[],[first,...rest]=pubRows,writeDeps=[];
+      if(!first){const values={'记录类型':'公共链接','状态':'启用','其他':pubText};if(has('来源'))values['来源']=tag+'\n公共链接：原表第 1 行';const ids=addOp({kind:'add',table:'library',values});gameOps.push(...ids);writeDeps.push(...ids);}
       else{
         const values={};
         if(canon('其他',first.row['其他'])!==canon('其他',pubText))values['其他']=pubText;
         for(const f of FIELDS)if(f!=='其他'&&clean(first.row[f]))values[f]='';
-        if(Object.keys(values).length){const old={};for(const f of Object.keys(values))old[f]=clean(first.row[f]);gameOps.push(...addOp({kind:'set',table:'library',recordId:first.id,values,old}));}
+        if(Object.keys(values).length){const old={};for(const f of Object.keys(values))old[f]=clean(first.row[f]);const ids=addOp({kind:'set',table:'library',recordId:first.id,values,old});gameOps.push(...ids);writeDeps.push(...ids);}
       }
-      for(const e of rest)gameOps.push(...addOp(retire(e,tag+'：公共链接已合并到另一行，确认后可删除本行',has)));
+      for(const e of rest)gameOps.push(...addOp(retire(e,tag+'：公共链接已合并到另一行，确认后可删除本行',has,writeDeps)));
       if(gameOps.length)games.push({key:'*public',full:'公共链接',kind:'public',fingerprint:publicFingerprint(library),ops:gameOps,merged:rest.length,
         ...changes(pubRows.map(({row})=>({row:{...row,'专服':''}})),[{row:{'其他':pubText}}])});
     }
@@ -180,12 +198,12 @@
     return {games,ops,counts:{games:games.length,adds:count('add'),sets:count('set'),retires:ops.filter(o=>o.retire).length,configs:ops.filter(o=>o.table==='settings').length,
       links:games.reduce((n,g)=>n+g.added.length,0),removed:games.reduce((n,g)=>n+g.removed.length,0)}};
   }
-  function retire(e,reason,has){
+  function retire(e,reason,has,dependsOn=[]){
     // 先写原因，再改状态：中途中断时不会出现没有说明的待核对行。
     const values={},old={};
     if(has('核对说明')){values['核对说明']=[clean(e.row['核对说明']),reason].filter(Boolean).join('\n');old['核对说明']=clean(e.row['核对说明']);}
     values['状态']='待核对';old['状态']=clean(e.row['状态']);
-    return {kind:'set',table:'library',recordId:e.id,values,old,retire:true,full:clean(e.row['完整名称']),dependsOn:[]};
+    return {kind:'set',table:'library',recordId:e.id,values,old,retire:true,full:clean(e.row['完整名称']),dependsOn:[...dependsOn]};
   }
   // 写入前在最新数据上复核：本款游戏的行或配置自预览后有变化则整款跳过，避免覆盖他人的修改。
   function stale(game,library,settings){

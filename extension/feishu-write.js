@@ -69,13 +69,18 @@
   }
   // 选用同域名已打开的飞书标签；没有时在后台新开一个，任务结束后关闭。
   function channel(chrome,{origin,url,timeout=30000}){
-    let tabId=null,created=false;
+    let tabId=null,createdTabId=null;
     const same=u=>{try{return new URL(u).origin===origin;}catch{return false;}};
     async function acquire(){
-      if(tabId!=null){try{const t=await chrome.tabs.get(tabId);if(t.status==='complete'&&same(t.url))return tabId;}catch{}tabId=null;}
+      if(tabId!=null){
+        const current=tabId;
+        try{const t=await chrome.tabs.get(current);if(t.status==='complete'&&same(t.url))return current;}
+        catch{if(createdTabId===current)createdTabId=null;}
+        tabId=null;
+      }
       const ok=(await chrome.tabs.query({url:origin+'/*'})).find(t=>t.status==='complete'&&!t.discarded&&same(t.url));
       if(ok)return tabId=ok.id;
-      const t=await chrome.tabs.create({url,active:false});tabId=t.id;created=true;
+      const t=await chrome.tabs.create({url,active:false});tabId=t.id;createdTabId=t.id;
       for(const until=Date.now()+timeout;Date.now()<until;){
         await sleep(500);
         const x=await chrome.tabs.get(tabId);
@@ -90,7 +95,8 @@
         return result?.result??{bridge:'没有返回结果'};
       }catch(e){return {bridge:String(e?.message||e).slice(0,200)};}
     }
-    async function close(){const id=tabId;tabId=null;if(created&&id!=null){created=false;await chrome.tabs.remove(id).catch(()=>{});}}
+    // 只关闭本通道新建的标签：创建页被关掉后复用用户标签时，close 不能误关用户的页面。
+    async function close(){const id=tabId;tabId=null;const created=id!=null&&id===createdTabId;createdTabId=null;if(created)await chrome.tabs.remove(id).catch(()=>{});}
     return {acquire,send,close};
   }
   const api={recordId,gzip64,payload,pageSend,classify,channel};

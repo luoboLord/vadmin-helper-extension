@@ -80,6 +80,8 @@
       for(const j of jobs.filter(j=>j.state==='ready'))await store.put({...j,state:'cancelled',phase:'已取消',ops:j.ops.map(o=>({...o,state:'cancelled'}))});
       const config=await getConfig();if(!config.url)throw Error('请先在数据管理配置飞书链接库地址');
       const [sheet,lib]=await Promise.all([readSheet(url),readTables(config,{requireCompact:true})]);
+      // 原表有无法解析的图片/附件单元格时名单可能缺游戏，不能据缺失推断下架或待核对。
+      if(sheet.complete===false)throw Error('原表读取不完整：游戏名或专服列存在无法识别的图片/附件单元格，无法核对完整游戏名单。请先核对原表中的图片和附件单元格内容，确认完整后重新对比。');
       const stamp=new Date(now()).toLocaleDateString('zh-CN',{timeZone:'Asia/Shanghai'});
       const plan=Y.plan({sheet,library:lib.library,settings:lib.settings,stamp});
       Y.simulate(plan,{sheet,library:lib.library,settings:lib.settings});
@@ -193,15 +195,25 @@
         if(config.url!==job.target.configUrl||config.revision!==job.target.configRevision)return await pause('target','数据源配置已改变，任务已暂停；恢复时不会切换写入目标，请改回原数据源或放弃任务');
         await fresh();
         for(const op of job.ops.filter(o=>UNRESOLVED.includes(o.state)))if(await step(op)==='pause')return;
-        for(const game of job.plan.games.filter(g=>g.selected)){
-          const mine=job.ops.filter(o=>o.game===game.key&&o.state==='pending');if(!mine.length)continue;
-          // 整款游戏首次写入前复核：预览后有人改过本款游戏的行或配置，整款跳过，不覆盖。
-          if(!game.checked){
-            const lib=await fresh();
-            if(Y.stale(game,lib.library,lib.settings)){for(const o of mine){o.state='skipped';o.error='预览后链接库中本游戏已被修改，本次未写入，请重新对比';}await save(job);continue;}
-            game.checked=true;
+        // 未知写入经恢复核实后，依赖已全部完成的阻塞操作按轮次重新排队并执行：
+        // 每轮执行完再检查下一层，直到多层依赖链（配置→记录→停用旧行）全部解锁；
+        // 依赖失败/冲突/仍阻塞的保持不动，step() 对依赖未完成的 pending 会重新标为 blocked，不会死循环。
+        for(;;){
+          const revived=job.ops.filter(o=>o.state==='blocked'&&o.dependsOn.every(d=>DONE.includes(job.ops.find(x=>x.id===d)?.state)));
+          if(revived.length){for(const op of revived){op.state='pending';op.error='';}await save(job);}
+          let ran=false;
+          for(const game of job.plan.games.filter(g=>g.selected)){
+            const mine=job.ops.filter(o=>o.game===game.key&&o.state==='pending');if(!mine.length)continue;
+            ran=true;
+            // 整款游戏首次写入前复核：预览后有人改过本款游戏的行或配置，整款跳过，不覆盖。
+            if(!game.checked){
+              const lib=await fresh();
+              if(Y.stale(game,lib.library,lib.settings)){for(const o of mine){o.state='skipped';o.error='预览后链接库中本游戏已被修改，本次未写入，请重新对比';}await save(job);continue;}
+              game.checked=true;
+            }
+            for(const op of mine)if(await step(op)==='pause')return;
           }
-          for(const op of mine)if(await step(op)==='pause')return;
+          if(!ran)break;
         }
         job.state='done';job.phase='刷新缓存';job.pause=null;await save(job);
         let cache;try{cache=await refresh();}catch(e){cache={ok:false,error:e.message};}

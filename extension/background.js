@@ -20,7 +20,7 @@ async function manager(active=true){
   opening=(async()=>{
     const {managerTab}=await chrome.storage.session.get('managerTab');
     if(Number.isInteger(managerTab)){
-      try{const tab=await chrome.tabs.get(managerTab);if(tab.url?.split('#')[0]===chrome.runtime.getURL('manager.html'))return active?await chrome.tabs.update(managerTab,{active:true}):tab;}catch{}
+      try{const tab=await chrome.tabs.get(managerTab);if(isExtensionPage(tab.url,'manager.html'))return active?await chrome.tabs.update(managerTab,{active:true}):tab;}catch{}
     }
     const tab=await chrome.tabs.create({url:chrome.runtime.getURL('manager.html'),active});await chrome.storage.session.set({managerTab:tab.id});return tab;
   })();
@@ -37,6 +37,8 @@ async function focusOrCreate(url,same){
   return chrome.tabs.create({url,active:true});
 }
 const samePage=target=>current=>{try{const a=new URL(current),b=new URL(target);return a.origin===b.origin&&a.pathname===b.pathname;}catch{return false;}};
+// 扩展页认证按“本扩展来源 + 页面路径”判断，允许 # 分页锚点和查询串，但不能是其他页面或其他扩展。
+const isExtensionPage=(url,name)=>{try{const a=new URL(url),b=new URL(chrome.runtime.getURL(name));return a.protocol==='chrome-extension:'&&a.hostname===b.hostname&&a.pathname===b.pathname;}catch{return false;}};
 async function refresh(){
   if(refreshing)return refreshing;
   refreshing=(async()=>{
@@ -78,8 +80,8 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
   // Answered by tab-reuse/background/service-worker.js.
   if(typeof message?.type==='string'&&message.type.startsWith('tab-reuse:'))return;
   (async()=>{
-    const isManager=sender.url===chrome.runtime.getURL('manager.html');
-    const isUpdate=sender.url===chrome.runtime.getURL('update.html');
+    const isManager=isExtensionPage(sender.url,'manager.html');
+    const isUpdate=isExtensionPage(sender.url,'update.html');
     const u=new URL(sender.tab?.url||sender.url||'about:blank');
     const isBackend=u.origin==='https://vadmin.648sy.com'&&WorkToolCore.supportedPath(u.pathname);
     if(!isManager&&!isBackend&&!isUpdate)throw Error('此页面不能操作链接库');

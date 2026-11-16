@@ -9,6 +9,23 @@ const tabReuseController = createTabReuseController(chrome, stateStore);
 const duplicateCleanup = createDuplicateCleanup(chrome);
 const linkReuseBridge = createLinkReuseBridge(chrome, tabReuseController);
 
+// Only the extension's own copy of the given page may talk to this worker.
+// The page may carry a hash fragment (pagination anchors) or a query string;
+// the extension origin and the page path still have to match exactly.
+function isExtensionPage(url, page) {
+  try {
+    const actual = new URL(url);
+    const expected = new URL(chrome.runtime.getURL(page));
+    return (
+      actual.protocol === "chrome-extension:" &&
+      actual.hostname === expected.hostname &&
+      actual.pathname === expected.pathname
+    );
+  } catch {
+    return false;
+  }
+}
+
 // The toolbar badge belongs to the link helper's update notice, so the paused
 // state is shown on the data management page instead.
 async function handleMessage(message) {
@@ -67,7 +84,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (typeof message?.type !== "string" || !message.type.startsWith(MESSAGE_PREFIX)) {
     return false;
   }
-  if (sender.id !== chrome.runtime.id || sender.url !== chrome.runtime.getURL("manager.html")) {
+  if (sender.id !== chrome.runtime.id || !isExtensionPage(sender.url, "manager.html")) {
     sendResponse({ ok: false, error: "Rejected message sender." });
     return false;
   }
